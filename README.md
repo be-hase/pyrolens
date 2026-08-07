@@ -8,6 +8,8 @@ self-contained binary / Docker image.
 > Grafana Labs. "Pyroscope" is a trademark of Grafana Labs, used here only to
 > describe compatibility.
 
+![Single view](docs/screenshots/single-dark.png)
+
 **Works with Pyroscope v1 (tested: v1.21.1) and v2 (tested: v2.2.1).** The UI
 only speaks the `querier.v1.QuerierService` API, which both major versions
 serve, in both single-tenant and multi-tenant (`-auth.multitenancy-enabled`)
@@ -27,6 +29,23 @@ brings the classic workflow back, plus a few things the old UI never had:
 - **Comparison view** colors frames by package-name hash, so the same
   function has the same color in both panes. **Diff view** shows the classic
   green/red differential flame graph (color-blind palette available).
+
+## The views
+
+**Diff** — what got slower between two windows, ranked. Here an extra
+`slowRegression` frame shows up as `+33.57%`.
+
+![Diff view](docs/screenshots/diff-dark.png)
+
+**Tag Explorer** — break a service down by any label, then jump straight
+into a Comparison or Diff for one value of it.
+
+![Tag Explorer](docs/screenshots/explore-dark.png)
+
+**Comparison** — two independent queries and time windows side by side,
+with matching colors so the same function is the same color in both.
+
+![Comparison view](docs/screenshots/comparison-dark.png)
 
 ## Quick start
 

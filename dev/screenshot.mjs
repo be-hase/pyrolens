@@ -13,24 +13,32 @@ const { chromium } = await import(process.env.PLAYWRIGHT ?? 'playwright');
 const BASE = process.env.BASE ?? 'http://localhost:4041';
 const TENANT = process.env.TENANT ?? '';
 const OUT = process.env.OUT ?? 'dev/screenshots';
+// FROM/UNTIL pin the main time range, so a shot is not mostly empty axis
+// while the load generator is still warming up.
+const FROM = process.env.FROM ?? '';
+const UNTIL = process.env.UNTIL ?? '';
 
+const range =
+  (FROM ? `from=${encodeURIComponent(FROM)}&` : '') +
+  (UNTIL ? `until=${encodeURIComponent(UNTIL)}&` : '');
 const tenant = TENANT ? `tenant=${encodeURIComponent(TENANT)}&` : '';
+const prefix = tenant + range;
 const now = Date.now();
 
 const views = [
-  { name: 'single', path: `/?${tenant}`, ready: 'canvas' },
-  { name: 'comparison', path: `/comparison?${tenant}`, ready: 'canvas' },
+  { name: 'single', path: `/?${prefix}`, ready: 'canvas' },
+  { name: 'comparison', path: `/comparison?${prefix}`, ready: 'canvas' },
   {
     name: 'diff',
     // Two adjacent windows, so the diff has something to show.
     path:
-      `/diff?${tenant}leftFrom=${now - 240000}&leftUntil=${now - 120000}` +
+      `/diff?${prefix}leftFrom=${now - 240000}&leftUntil=${now - 120000}` +
       `&rightFrom=${now - 120000}&rightUntil=${now}`,
     ready: 'canvas',
   },
   {
     name: 'explore',
-    path: `/explore?${tenant}groupBy=region`,
+    path: `/explore?${prefix}groupBy=region`,
     ready: '.tag-explorer-table',
   },
 ];
