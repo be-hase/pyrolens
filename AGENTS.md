@@ -49,8 +49,10 @@ yarn dev            # vite on :5173; PYROSCOPE_URL=... to point it elsewhere
 yarn type-check     # tsc -b
 yarn lint           # eslint
 yarn format         # prettier --check   (format:fix to write)
-yarn test           # node:test unit tests
+yarn test           # vitest: units, hooks and components (jsdom)
 yarn build          # -> dist/
+
+go test ./...       # server tests (needs dist/, see above)
 
 make build          # yarn build + go build -o pyrolens
 make run            # build, then serve on :4041
@@ -83,6 +85,9 @@ the binaries and the image.
 - `src/lib/flamegraph/` — **vendored**; see its `VENDORED.md` before touching
   it. Excluded from eslint on purpose, and its classes are prefixed `plfg-`
   so they cannot collide with app styles.
+- `vitest.config.ts` — the test setup, built on `vite.config.ts` so tests
+  resolve imports and compile TSX the way the bundle does. jsdom, Testing
+  Library, and `node:assert/strict` for the assertions.
 
 ## Rules that are easy to break
 
