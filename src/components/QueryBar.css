@@ -1,0 +1,109 @@
+.querybar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 44px;
+  padding: 0 var(--space-3);
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-weak);
+}
+
+.querybar-input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+}
+
+.querybar-input {
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--space-3);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  transition:
+    border-color 0.15s ease-out,
+    box-shadow 0.15s ease-out;
+}
+
+.querybar-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--color-primary) 25%, transparent);
+}
+
+.querybar-run {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 var(--space-3);
+  background: var(--color-primary-strong);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: #fff;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.querybar-run:hover {
+  filter: brightness(1.1);
+}
+
+.querybar-suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 100;
+  min-width: 260px;
+  max-width: 100%;
+  max-height: 240px;
+  margin: 0;
+  padding: var(--space-1);
+  overflow-y: auto;
+  list-style: none;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.querybar-suggestion {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.querybar-suggestion.active {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.querybar-run:disabled {
+  opacity: 0.75;
+  cursor: default;
+}
+
+.querybar-spin {
+  animation: querybar-spin 0.8s linear infinite;
+}
+
+@keyframes querybar-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -1,0 +1,43 @@
+.plfg-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background 0.1s ease-out,
+    color 0.1s ease-out;
+}
+
+.plfg-icon-btn-sm {
+  width: 18px;
+  height: 18px;
+}
+
+.plfg-icon-btn-md {
+  width: 22px;
+  height: 22px;
+}
+
+.plfg-icon-btn:hover:not(:disabled) {
+  background: var(--action-hover);
+  color: var(--text-primary);
+}
+
+.plfg-icon-btn:focus-visible {
+  outline: 2px solid var(--action-focus);
+  outline-offset: 1px;
+}
+
+.plfg-icon-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.plfg-icon-btn-primary {
+  color: var(--color-primary-text);
+}

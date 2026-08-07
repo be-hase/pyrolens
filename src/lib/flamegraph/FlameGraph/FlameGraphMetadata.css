@@ -1,0 +1,35 @@
+/* Styles for FlameGraphMetadata.tsx (ported from the upstream emotion blocks). */
+
+.plfg-metadata {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 8px 0;
+  color: var(--text-secondary);
+}
+
+.plfg-metadata-pill {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-secondary);
+  /* upstream: theme.shape.borderRadius(8) === 8 * 2px */
+  border-radius: 16px;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.plfg-metadata-pill-close-button {
+  vertical-align: text-bottom;
+  margin: 0 var(--space-1);
+}
+
+.plfg-metadata-pill-name {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: var(--space-1);
+}

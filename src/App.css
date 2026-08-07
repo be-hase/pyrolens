@@ -1,0 +1,67 @@
+/* App shell layout. Theme variables come from theme.css. */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* Vertical stack of controls + panels rendered by every view. */
+.app-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3);
+}
+
+/* Two-pane layout used by the Comparison and Diff views. */
+.comparison-grid {
+  display: grid;
+  align-items: start;
+  gap: var(--space-3);
+  grid-template-columns: 1fr 1fr;
+}
+
+.comparison-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Error notice; inlined by views above their panels. */
+.app-error {
+  background: #e5484d14;
+  border: 1px solid #e5484d59;
+  border-radius: var(--radius-md);
+  color: #e5484d;
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+  padding: var(--space-2) var(--space-3);
+}
+
+/* Full-page variant for the initial "cannot reach the server" state. */
+.app-error-page {
+  font-size: var(--text-md);
+  margin: auto;
+  max-width: 32rem;
+  padding: var(--space-4);
+  text-align: center;
+}
+
+.app-error-page p {
+  margin: 0 0 var(--space-2);
+}
+
+.app-error-page p:last-child {
+  margin-bottom: 0;
+}
+
+.app-error-detail {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}

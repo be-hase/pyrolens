@@ -1,0 +1,71 @@
+version: 2
+
+project_name: pyrolens
+
+# NOT the default "dist": that directory holds the built UI, which
+# `//go:embed all:dist` in main.go compiles into the binary. Letting
+# GoReleaser --clean it would delete the UI mid-release.
+dist: .goreleaser-dist
+
+# The binary embeds dist/, so the UI has to exist before any Go build runs.
+# These hooks fire once; the bundle is platform-independent, so every
+# target embeds the same output.
+before:
+  hooks:
+    - corepack enable
+    - yarn install --immutable
+    - yarn build
+
+builds:
+  - binary: pyrolens
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - arm64
+      - amd64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  draft: false
+
+# No "sort:" — GoReleaser sorts by commit subject rather than by time, which
+# scrambles the notes. Left unset, git's chronological order survives.
+changelog:
+  use: github
+  filters:
+    exclude: ['^docs:', '^test:', '^chore:']
+
+# One multi-arch image. GHCR is the registry because GITHUB_TOKEN can
+# already push to it — no extra secret to manage.
+dockers_v2:
+  - images:
+      - ghcr.io/be-hase/pyrolens
+    tags:
+      - '{{ .Version }}'
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile.release
+    labels:
+      org.opencontainers.image.title: '{{ .ProjectName }}'
+      org.opencontainers.image.version: '{{ .Version }}'
+      org.opencontainers.image.revision: '{{ .FullCommit }}'
+      org.opencontainers.image.source: https://github.com/be-hase/pyrolens
+      org.opencontainers.image.licenses: Apache-2.0

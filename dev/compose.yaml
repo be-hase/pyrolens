@@ -1,0 +1,62 @@
+# A Pyroscope with data in it, for developing against.
+#
+#   docker compose -f dev/compose.yaml up -d        # multi-tenant on :4040
+#   docker compose -f dev/compose.yaml --profile single up -d   # plus :4045
+#
+# Then point the UI at it: `make run` (defaults to localhost:4040).
+# See dev/README.md.
+
+services:
+  # Multi-tenant: the UI asks for a tenant and sends it as X-Scope-OrgID.
+  pyroscope:
+    image: grafana/pyroscope:2.2.1
+    command: ['-auth.multitenancy-enabled']
+    ports: ['4040:4040']
+
+  loadgen-a:
+    image: golang:1.25-alpine
+    working_dir: /src
+    volumes:
+      - ./loadgen:/src:ro
+      - gomodcache:/go/pkg/mod
+    environment:
+      SERVER: http://pyroscope:4040
+      TENANT: team-a
+      APP: checkout-service
+    command: ['go', 'run', '.']
+    depends_on: [pyroscope]
+
+  loadgen-b:
+    image: golang:1.25-alpine
+    working_dir: /src
+    volumes:
+      - ./loadgen:/src:ro
+      - gomodcache:/go/pkg/mod
+    environment:
+      SERVER: http://pyroscope:4040
+      TENANT: team-b
+      APP: billing-service
+    command: ['go', 'run', '.']
+    depends_on: [pyroscope]
+
+  # Single-tenant: no tenant UI at all. Opt in with `--profile single`.
+  pyroscope-single:
+    image: grafana/pyroscope:2.2.1
+    ports: ['4045:4040']
+    profiles: ['single']
+
+  loadgen-single:
+    image: golang:1.25-alpine
+    working_dir: /src
+    volumes:
+      - ./loadgen:/src:ro
+      - gomodcache:/go/pkg/mod
+    environment:
+      SERVER: http://pyroscope-single:4040
+      APP: checkout-service
+    command: ['go', 'run', '.']
+    depends_on: [pyroscope-single]
+    profiles: ['single']
+
+volumes:
+  gomodcache:

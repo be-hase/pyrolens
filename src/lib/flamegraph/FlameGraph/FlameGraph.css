@@ -1,0 +1,33 @@
+/* Styles for FlameGraph.tsx (ported from the upstream emotion blocks). */
+
+.plfg-graph {
+  overflow: auto;
+  flex-grow: 1;
+  flex-basis: 50%;
+}
+
+/*
+ * Upstream used `PIXELS_PER_LEVEL / window.devicePixelRatio` which is always
+ * 22 (PIXELS_PER_LEVEL is 22 * devicePixelRatio).
+ */
+.plfg-sandwich-canvas-wrapper {
+  display: flex;
+  margin-bottom: 22px;
+}
+
+.plfg-sandwich-marker {
+  writing-mode: vertical-lr;
+  transform: rotate(180deg);
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.plfg-sandwich-marker-callees {
+  text-align: right;
+}
+
+.plfg-sandwich-marker-icon {
+  vertical-align: baseline;
+}

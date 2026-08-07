@@ -1,0 +1,26 @@
+.plfg-dropdown {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.plfg-dropdown-trigger {
+  display: inline-flex;
+  align-items: center;
+}
+
+.plfg-dropdown-overlay {
+  position: absolute;
+  top: calc(100% + 4px);
+  z-index: 1050;
+}
+
+.plfg-dropdown-overlay-left {
+  left: 0;
+}
+
+/* Applied on top of `-left` when the panel would overflow the viewport. */
+.plfg-dropdown-overlay-right {
+  left: auto;
+  right: 0;
+}

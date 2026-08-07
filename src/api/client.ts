@@ -1,0 +1,361 @@
+// Connect-JSON client for the Pyroscope querier API.
+//
+// Every RPC is a POST to /querier.v1.QuerierService/<Method> with a JSON
+// body; the Go server proxies these paths to the real Pyroscope, so all URLs
+// are relative. Connect encodes int64 fields as JSON strings, so numeric
+// fields coming off the wire are normalized with Number()/String() before
+// they reach callers. Times are unix milliseconds throughout.
+
+const BASE = '/querier.v1.QuerierService';
+
+// --- Tenant plumbing ---------------------------------------------------------
+
+let currentTenant: string | undefined;
+
+/**
+ * Sets the tenant sent as `X-Scope-OrgID` on every subsequent request.
+ * Pass undefined (or '') to clear it (single-tenant mode).
+ */
+export function setTenant(tenant: string | undefined): void {
+  currentTenant = tenant || undefined;
+}
+
+export function getTenant(): string | undefined {
+  return currentTenant;
+}
+
+/**
+ * Probes whether the backing Pyroscope requires a tenant. Sends a LabelNames
+ * request with an explicitly empty `X-Scope-OrgID`: HTTP 200 means
+ * single-tenant (resolves false); an error complaining about a missing
+ * org/tenant id means multi-tenant (resolves true). Rejects only when the
+ * server cannot be reached at all.
+ */
+export async function checkMultitenancy(): Promise<boolean> {
+  const now = Date.now();
+  const res = await fetch(`${BASE}/LabelNames`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Scope-OrgID': '' },
+    body: JSON.stringify({ start: now - 3_600_000, end: now }),
+  });
+  if (res.ok) return false;
+  // Gateway errors mean Pyroscope itself is unreachable behind the bundled
+  // proxy — that's an outage, not a tenancy verdict.
+  if (res.status >= 502 && res.status <= 504) {
+    const body = await res.text().catch(() => '');
+    throw new Error(body || `upstream error (HTTP ${res.status})`);
+  }
+  const body = await res.text().catch(() => '');
+  return /org|tenant/i.test(body);
+}
+
+// --- Transport ---------------------------------------------------------------
+
+async function rpc<T>(
+  method: string,
+  body: unknown,
+  signal?: AbortSignal,
+): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (currentTenant) headers['X-Scope-OrgID'] = currentTenant;
+
+  const res = await fetch(`${BASE}/${method}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!res.ok) {
+    let message = `${method} failed: HTTP ${res.status}`;
+    try {
+      const err = (await res.json()) as { message?: string };
+      if (err.message) message = err.message;
+    } catch {
+      // Non-JSON error body; keep the generic message.
+    }
+    throw new Error(message);
+  }
+  return (await res.json()) as T;
+}
+
+// Wire shapes (connect-JSON; int64 arrives as string).
+interface WireLabel {
+  name: string;
+  value: string;
+}
+interface WirePoint {
+  timestamp: number | string;
+  value: number | string;
+}
+interface WireSeries {
+  labels?: WireLabel[];
+  points?: WirePoint[];
+}
+interface WireFlamegraph {
+  names?: string[];
+  levels?: { values?: (number | string)[] }[];
+  total?: number | string;
+  maxSelf?: number | string;
+}
+
+// --- Profile types -----------------------------------------------------------
+
+// Profile type IDs have the form `name:sampleType:sampleUnit:periodType:periodUnit`,
+// e.g. `process_cpu:cpu:nanoseconds:cpu:nanoseconds`.
+
+export type ProfileUnit = 'ns' | 'bytes' | 'count';
+
+/** Display unit for a profile type ID ('ns' values are nanoseconds). */
+export function profileTypeUnit(profileTypeID: string): ProfileUnit {
+  switch (profileTypeID.split(':')[2]) {
+    case 'nanoseconds':
+      return 'ns';
+    case 'bytes':
+      return 'bytes';
+    default:
+      return 'count';
+  }
+}
+
+/** Short display name for a profile type ID (its sample type, e.g. "cpu"). */
+export function profileTypeLabel(profileTypeID: string): string {
+  return profileTypeID.split(':')[1] || profileTypeID;
+}
+
+/** Sorts profile type IDs for display: cpu first, then by label. */
+export function sortProfileTypes(profileTypes: string[]): string[] {
+  const rank = (id: string) => (profileTypeLabel(id) === 'cpu' ? 0 : 1);
+  return [...profileTypes].sort(
+    (a, b) =>
+      rank(a) - rank(b) ||
+      profileTypeLabel(a).localeCompare(profileTypeLabel(b)),
+  );
+}
+
+// --- Services ----------------------------------------------------------------
+
+export interface Service {
+  name: string;
+  profileTypes: string[];
+}
+
+/**
+ * Lists services (sorted by name) with the profile type IDs each exposes,
+ * derived from the `service_name` / `__profile_type__` labels of Series.
+ */
+export async function fetchServices(
+  start: number,
+  end: number,
+  signal?: AbortSignal,
+): Promise<Service[]> {
+  const res = await rpc<{ labelsSet?: { labels?: WireLabel[] }[] }>(
+    'Series',
+    {
+      start,
+      end,
+      matchers: ['{}'],
+      labelNames: ['service_name', '__profile_type__'],
+    },
+    signal,
+  );
+
+  const byService = new Map<string, Set<string>>();
+  for (const set of res.labelsSet ?? []) {
+    const service = set.labels?.find((l) => l.name === 'service_name')?.value;
+    const type = set.labels?.find((l) => l.name === '__profile_type__')?.value;
+    if (!service || !type) continue;
+    const types = byService.get(service) ?? new Set<string>();
+    types.add(type);
+    byService.set(service, types);
+  }
+
+  return [...byService]
+    .map(([name, types]) => ({ name, profileTypes: [...types] }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// --- Flamegraphs -------------------------------------------------------------
+
+export interface ProfileQuery {
+  profileTypeID: string;
+  labelSelector: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * Single flamegraph in Pyroscope flamebearer format: `levels[i]` is a flat
+ * number array in groups of 4 — offset (relative to the previous sibling's
+ * end), total, self, name index into `names`.
+ */
+export interface FlamegraphData {
+  names: string[];
+  levels: number[][];
+  total?: number;
+  maxSelf?: number;
+}
+
+export async function fetchFlamegraph(
+  params: ProfileQuery,
+  signal?: AbortSignal,
+): Promise<FlamegraphData> {
+  const res = await rpc<{ flamegraph?: WireFlamegraph }>(
+    'SelectMergeStacktraces',
+    params,
+    signal,
+  );
+  const fg = res.flamegraph;
+  return {
+    names: fg?.names ?? [],
+    levels: (fg?.levels ?? []).map((l) => (l.values ?? []).map(Number)),
+    total: Number(fg?.total ?? 0),
+    maxSelf: Number(fg?.maxSelf ?? 0),
+  };
+}
+
+/**
+ * Diff flamegraph in the "double" flamebearer format: `levels[i].values` is a
+ * flat array in groups of 7 — offsetLeft, totalLeft, selfLeft, offsetRight,
+ * totalRight, selfRight, nameIdx. Values are kept as strings (as sent on the
+ * wire); consumers parse them.
+ */
+export interface DiffFlamegraphData {
+  names: string[];
+  levels: { values: string[] }[];
+}
+
+export async function fetchDiffFlamegraph(
+  left: ProfileQuery,
+  right: ProfileQuery,
+  signal?: AbortSignal,
+): Promise<DiffFlamegraphData> {
+  const res = await rpc<{ flamegraph?: WireFlamegraph }>(
+    'Diff',
+    { left, right },
+    signal,
+  );
+  return {
+    names: res.flamegraph?.names ?? [],
+    levels: (res.flamegraph?.levels ?? []).map((l) => ({
+      values: (l.values ?? []).map(String),
+    })),
+  };
+}
+
+// --- Timelines ---------------------------------------------------------------
+
+export interface Point {
+  /** Unix milliseconds. */
+  timestamp: number;
+  value: number;
+}
+
+function toPoints(points: WirePoint[] | undefined): Point[] {
+  return (points ?? []).map((p) => ({
+    timestamp: Number(p.timestamp),
+    value: Number(p.value),
+  }));
+}
+
+/** Timeline for a query; `step` is in seconds (see timelineStep). */
+export async function fetchTimeline(
+  params: ProfileQuery & { step: number },
+  signal?: AbortSignal,
+): Promise<Point[]> {
+  const res = await rpc<{ series?: WireSeries[] }>(
+    'SelectSeries',
+    params,
+    signal,
+  );
+  const series = res.series ?? [];
+  if (series.length <= 1) return toPoints(series[0]?.points);
+
+  // No groupBy was requested, but the server returned several series: sum
+  // them per timestamp so callers always see a single line.
+  const byTs = new Map<number, number>();
+  for (const s of series) {
+    for (const p of toPoints(s.points)) {
+      byTs.set(p.timestamp, (byTs.get(p.timestamp) ?? 0) + p.value);
+    }
+  }
+  return [...byTs]
+    .map(([timestamp, value]) => ({ timestamp, value }))
+    .sort((a, b) => a.timestamp - b.timestamp);
+}
+
+export interface GroupedTimeline {
+  labelValue: string;
+  points: Point[];
+}
+
+/**
+ * One timeline per value of the `groupBy` label, ordered by total (sum of
+ * point values) descending and truncated to `limit` when given.
+ */
+export async function fetchGroupedTimelines(
+  params: ProfileQuery & { step: number; groupBy: string; limit?: number },
+  signal?: AbortSignal,
+): Promise<GroupedTimeline[]> {
+  const { groupBy, limit, ...rest } = params;
+  const res = await rpc<{ series?: WireSeries[] }>(
+    'SelectSeries',
+    { ...rest, groupBy: [groupBy] },
+    signal,
+  );
+
+  // Series can share a label value (notably every series missing the label
+  // maps to '(none)') — merge them by summing per timestamp.
+  const merged = new Map<string, Map<number, number>>();
+  for (const s of res.series ?? []) {
+    const labelValue =
+      s.labels?.find((l) => l.name === groupBy)?.value ?? '(none)';
+    const bucket = merged.get(labelValue) ?? new Map<number, number>();
+    for (const p of toPoints(s.points)) {
+      bucket.set(p.timestamp, (bucket.get(p.timestamp) ?? 0) + p.value);
+    }
+    merged.set(labelValue, bucket);
+  }
+  const sum = (points: Point[]) => points.reduce((acc, p) => acc + p.value, 0);
+  const grouped = [...merged]
+    .map(([labelValue, bucket]) => ({
+      labelValue,
+      points: [...bucket]
+        .map(([timestamp, value]) => ({ timestamp, value }))
+        .sort((a, b) => a.timestamp - b.timestamp),
+    }))
+    .sort((a, b) => sum(b.points) - sum(a.points));
+  return limit === undefined ? grouped : grouped.slice(0, limit);
+}
+
+// --- Labels ------------------------------------------------------------------
+
+export async function fetchLabelNames(
+  matchers: string[],
+  start: number,
+  end: number,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const res = await rpc<{ names?: string[] }>(
+    'LabelNames',
+    { start, end, matchers },
+    signal,
+  );
+  return res.names ?? [];
+}
+
+export async function fetchLabelValues(
+  name: string,
+  matchers: string[],
+  start: number,
+  end: number,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const res = await rpc<{ names?: string[] }>(
+    'LabelValues',
+    { name, start, end, matchers },
+    signal,
+  );
+  return res.names ?? [];
+}

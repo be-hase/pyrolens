@@ -1,0 +1,35 @@
+/*
+ * Colour-scheme picker button. The gradient itself is applied inline from
+ * `FlameGraph/colors.ts` so the swatch always matches the rendered graph.
+ */
+
+.plfg-color-scheme-button {
+  margin-right: var(--space-2);
+}
+
+/* In diff mode the swatch is a wide legend bar, so let the button grow. */
+.plfg-color-scheme-button-diff {
+  padding-left: var(--space-1);
+  padding-right: var(--space-1);
+}
+
+.plfg-color-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.plfg-color-dot-diff {
+  display: flex;
+  width: 200px;
+  height: 12px;
+  /* Sits on top of the gradient, so it stays white in both themes. */
+  color: #fff;
+  font-size: 9px;
+  line-height: 1.3;
+  font-weight: 300;
+  justify-content: space-between;
+  padding: 0 2px;
+  border-radius: 2px;
+}

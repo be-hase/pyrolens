@@ -1,0 +1,59 @@
+/* Timeline chart layout, shared by TimeSeries (canvas) and MultiTimeSeries
+ * (svg): a fixed-width y-axis gutter on the left, the chart filling the
+ * rest, and absolutely positioned tick labels on both axes. */
+
+.timeseries {
+  display: flex;
+  min-width: 0;
+}
+
+.timeseries-y-axis {
+  position: relative;
+  width: 32px;
+  flex-shrink: 0;
+}
+
+.timeseries-y-label {
+  position: absolute;
+  right: var(--space-2);
+  transform: translateY(-50%);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+.timeseries-chart {
+  flex: 1;
+  min-width: 0;
+}
+
+.timeseries-canvas {
+  display: block;
+  width: 100%;
+  height: 100px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.timeseries-svg {
+  display: block;
+}
+
+.timeseries-x-axis {
+  position: relative;
+  height: 18px;
+  margin-top: 2px;
+}
+
+.timeseries-x-label {
+  position: absolute;
+  top: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  opacity: 0.6;
+  white-space: nowrap;
+}

@@ -1,0 +1,55 @@
+/*
+ * Top-level flame graph layout: header row plus the body, which is either the
+ * flame graph, the top table, or both side by side / stacked.
+ *
+ * `--plfg-container-height` is the upstream FLAMEGRAPH_CONTAINER_HEIGHT. In a
+ * panel it would ideally be 100%, but a fixed height is what keeps the table
+ * from creating a double scrollbar.
+ */
+
+.plfg-container {
+  --plfg-container-height: 800px;
+
+  overflow: auto;
+  height: 100%;
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  gap: var(--space-2);
+}
+
+.plfg-body {
+  flex-grow: 1;
+}
+
+.plfg-table-container {
+  height: var(--plfg-container-height);
+}
+
+.plfg-horizontal-container {
+  display: flex;
+  min-height: 0;
+  flex-direction: row;
+  column-gap: var(--space-2);
+  width: 100%;
+}
+
+.plfg-horizontal-graph-container {
+  flex-basis: 50%;
+  min-width: 0;
+}
+
+.plfg-horizontal-table-container {
+  flex-basis: 50%;
+  min-width: 0;
+  max-height: var(--plfg-container-height);
+}
+
+.plfg-vertical-graph-container {
+  margin-bottom: var(--space-2);
+}
+
+.plfg-vertical-table-container {
+  height: var(--plfg-container-height);
+}

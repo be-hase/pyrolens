@@ -1,0 +1,16 @@
+.plfg-tooltip-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1070;
+  max-width: 800px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  pointer-events: none;
+  user-select: text;
+}

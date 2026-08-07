@@ -1,0 +1,52 @@
+/*
+ * Flame graph toolbar: search box on the left, view/colour/alignment controls
+ * on the right.
+ */
+
+.plfg-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  width: 100%;
+  top: 0;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.plfg-header-sticky {
+  position: sticky;
+  z-index: 1000;
+  background: var(--bg-primary);
+}
+
+.plfg-header-input {
+  flex-grow: 1;
+  min-width: 150px;
+  max-width: 350px;
+}
+
+.plfg-header-right {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.plfg-button-spacing {
+  margin-right: var(--space-2);
+}
+
+.plfg-header-extra {
+  margin-left: var(--space-2);
+}
+
+/* Borderless "Clear" affordance inside the search input. */
+.plfg-btn.plfg-header-clear {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.plfg-btn.plfg-header-clear:hover:not(:disabled) {
+  background: var(--action-hover);
+  color: var(--text-primary);
+}

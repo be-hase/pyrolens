@@ -1,0 +1,8 @@
+# Image built during a GoReleaser release: the binary (UI already embedded)
+# is cross-compiled beforehand and dropped into the build context, so this
+# only has to package it. `Dockerfile` at the repo root is the from-source
+# build for local use.
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY pyrolens /pyrolens
+EXPOSE 4041
+ENTRYPOINT ["/pyrolens"]

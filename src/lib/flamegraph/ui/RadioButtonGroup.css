@@ -1,0 +1,67 @@
+.plfg-radio-group {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+}
+
+.plfg-radio-group-disabled {
+  opacity: 0.55;
+}
+
+.plfg-radio-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-weight: var(--weight-medium);
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.1s ease-out,
+    color 0.1s ease-out;
+}
+
+.plfg-radio-btn-sm {
+  height: 20px;
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.plfg-radio-btn-md {
+  height: 26px;
+  padding: 0 var(--space-3);
+  font-size: var(--text-md);
+}
+
+.plfg-radio-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--action-hover);
+}
+
+.plfg-radio-btn:focus-visible {
+  outline: 2px solid var(--action-focus);
+  outline-offset: -1px;
+}
+
+.plfg-radio-btn:disabled {
+  cursor: default;
+}
+
+.plfg-radio-btn-active {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--border-medium);
+}
+
+.plfg-radio-btn-active:hover:not(:disabled) {
+  background: var(--bg-elevated);
+}

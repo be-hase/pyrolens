@@ -1,0 +1,81 @@
+.plfg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-weight: var(--weight-medium);
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.1s ease-out;
+}
+
+.plfg-btn-sm {
+  height: 24px;
+  padding: 0 var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.plfg-btn-md {
+  height: 32px;
+  padding: 0 var(--space-3);
+  font-size: var(--text-md);
+}
+
+.plfg-btn:hover:not(:disabled) {
+  background: var(--action-hover);
+}
+
+.plfg-btn:focus-visible {
+  outline: 2px solid var(--action-focus);
+  outline-offset: 1px;
+}
+
+.plfg-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.plfg-btn-secondary {
+  border-color: var(--border-medium);
+}
+
+.plfg-btn-secondary:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.plfg-btn-primary {
+  background: var(--color-primary-strong);
+  border-color: var(--color-primary-strong);
+  color: var(--color-primary-contrast);
+}
+
+.plfg-btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-primary-strong) 88%, #fff);
+}
+
+/* Segmented row of buttons: collapse the seam between neighbours. */
+.plfg-button-group {
+  display: inline-flex;
+  align-items: center;
+}
+
+.plfg-button-group > .plfg-btn:not(:first-child) {
+  margin-left: -1px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.plfg-button-group > .plfg-btn:not(:last-child) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.plfg-button-group > .plfg-btn:hover:not(:disabled) {
+  z-index: 1;
+}

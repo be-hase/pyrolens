@@ -1,0 +1,41 @@
+.plfg-input {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  transition: border-color 0.15s ease-out;
+}
+
+.plfg-input:focus-within {
+  border-color: var(--color-primary);
+}
+
+.plfg-input-field {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.plfg-input-field:focus {
+  outline: none;
+  border: none;
+}
+
+.plfg-input-prefix,
+.plfg-input-suffix {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--text-secondary);
+}

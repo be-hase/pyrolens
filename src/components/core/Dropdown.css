@@ -1,0 +1,25 @@
+.dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  z-index: 100;
+  min-width: 100%;
+  padding: var(--space-1) 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.dropdown-left {
+  left: 0;
+}
+
+.dropdown-right {
+  right: 0;
+}
+
+.dropdown-divider {
+  height: 1px;
+  margin: var(--space-1) 0;
+  background: var(--border-weak);
+}

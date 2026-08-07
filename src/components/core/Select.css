@@ -1,0 +1,34 @@
+.select {
+  position: relative;
+  display: inline-block;
+  height: 35px;
+}
+
+.select .dropdown {
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.select-option {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.select-option:hover {
+  background: var(--action-hover);
+}
+
+.select-option.active {
+  background: var(--action-selected);
+  color: var(--color-primary-text);
+  font-weight: var(--weight-medium);
+}

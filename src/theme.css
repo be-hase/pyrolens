@@ -1,0 +1,228 @@
+/*
+ * Design tokens + base element styles for Pyrolens.
+ * Dark theme is the default; light theme activates via
+ * <html data-theme="light">.
+ */
+
+:root {
+  /* Surfaces */
+  --bg-body: #131519;
+  --bg-primary: #1a1d23;
+  --bg-secondary: #242933;
+  --bg-elevated: #2b313c;
+
+  /* Borders */
+  --border-weak: #ffffff0f;
+  --border-medium: #ffffff1f;
+  --border-strong: #ffffff38;
+
+  /* Text */
+  --text-primary: #d9dce3;
+  --text-secondary: #8d94a3;
+  --text-muted: #5b6272;
+  --text-link: var(--color-primary-text);
+
+  /* Accent */
+  --color-primary: #f97316;
+  /* Filled buttons sit a step darker so white label text clears 4.5:1
+     (white on --color-primary is only 2.8:1). */
+  --color-primary-strong: #c2410c;
+  --color-primary-contrast: #fff;
+  --color-primary-text: #fb923c;
+  --color-primary-border: #fb923c;
+
+  /* Interaction states */
+  --action-hover: #ffffff14;
+  --action-selected: #f9731630;
+  --action-focus: #f9731680;
+
+  /* Time-range selection overlay on charts: cool, so it never blends
+     with the amber data line. */
+  --chart-selection: #6f95d0;
+
+  /* Shadows */
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.7);
+
+  /* Typography */
+  --font-sans:
+    system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono:
+    ui-monospace, 'SF Mono', 'Cascadia Code', 'Menlo', 'Consolas', monospace;
+  --text-xs: 0.6875rem;
+  --text-sm: 0.75rem;
+  --text-md: 0.875rem;
+  --text-lg: 1rem;
+  --text-xl: 1.125rem;
+  --weight-medium: 500;
+  --weight-bold: 700;
+
+  /* Shape */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  /* Spacing */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+
+  /* Series palette (timelines, legends, breakdown chips) — validated
+     categorical set; dark steps here, light steps in the light theme. */
+  --series-1: #d95926;
+  --series-2: #3987e5;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+
+  color-scheme: dark;
+}
+
+html[data-theme='light'] {
+  --bg-body: #eef0f4;
+  --bg-primary: #fff;
+  --bg-secondary: #f4f6f9;
+  --bg-elevated: #fff;
+
+  --border-weak: #19235012;
+  --border-medium: #19235024;
+  --border-strong: #19235040;
+
+  --text-primary: #1c2038;
+  --text-secondary: #4d557a;
+  --text-muted: #9aa0bf;
+
+  --color-primary: #ea580c;
+  --color-primary-strong: #c2410c;
+  --color-primary-contrast: #fff;
+  --color-primary-text: #c2410c;
+  --color-primary-border: #f97316;
+
+  --action-hover: #1923500f;
+  --action-selected: #ea580c1f;
+  --action-focus: #ea580c80;
+  --chart-selection: #4a77c9;
+
+  /* Light steps of the series palette */
+  --series-1: #eb6834;
+  --series-2: #2a78d6;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+
+  --shadow-md: 0 8px 24px rgba(25, 35, 80, 0.18);
+  --shadow-lg: 0 16px 48px rgba(25, 35, 80, 0.25);
+
+  color-scheme: light;
+}
+
+/* Base */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg-body);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+input,
+textarea,
+select {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  transition:
+    border-color 0.15s ease-out,
+    box-shadow 0.15s ease-out;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-secondary);
+  opacity: 1;
+}
+
+button:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--action-focus);
+  outline-offset: 1px;
+}
+
+::selection {
+  background: var(--action-selected);
+}
+
+/* Scrollbars */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}

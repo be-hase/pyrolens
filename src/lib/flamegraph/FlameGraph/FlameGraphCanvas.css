@@ -1,0 +1,13 @@
+/* Styles for FlameGraphCanvas.tsx (ported from the upstream emotion blocks). */
+
+.plfg-canvas-graph {
+  overflow: auto;
+  flex-grow: 1;
+  flex-basis: 50%;
+}
+
+.plfg-canvas-wrapper {
+  cursor: pointer;
+  flex: 1;
+  overflow: hidden;
+}

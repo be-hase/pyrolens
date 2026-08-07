@@ -1,0 +1,53 @@
+/* Styles for FlameGraphTooltip.tsx (ported from the upstream emotion blocks). */
+
+.plfg-tooltip-content {
+  font-size: var(--text-sm);
+  width: 100%;
+  overflow: hidden;
+  color: var(--text-primary);
+}
+
+.plfg-tooltip-name {
+  margin-top: 0;
+  word-break: break-all;
+}
+
+.plfg-tooltip-last-paragraph {
+  margin-bottom: 0;
+}
+
+/* Plain replacement for @grafana/ui's InteractiveTable in the diff tooltip. */
+.plfg-tooltip-table {
+  max-width: 400px;
+  border-collapse: collapse;
+  width: 100%;
+  font-size: var(--text-sm);
+}
+
+.plfg-tooltip-table th,
+.plfg-tooltip-table td {
+  padding: var(--space-1) var(--space-2);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.plfg-tooltip-table th:first-child,
+.plfg-tooltip-table td:first-child {
+  text-align: left;
+}
+
+.plfg-tooltip-table thead th {
+  color: var(--text-secondary);
+  font-weight: var(--weight-medium);
+  border-bottom: 1px solid var(--border-weak);
+}
+
+.plfg-tooltip-table tbody th {
+  font-weight: var(--weight-medium);
+  color: var(--text-secondary);
+}
+
+.plfg-tooltip-table tbody tr + tr th,
+.plfg-tooltip-table tbody tr + tr td {
+  border-top: 1px solid var(--border-weak);
+}

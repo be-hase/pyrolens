@@ -1,0 +1,219 @@
+.time-range-picker {
+  position: relative;
+  display: inline-flex;
+}
+
+.time-range-picker .trp {
+  display: flex;
+  align-items: stretch;
+  padding: 0;
+  animation: trp-in 0.12s ease-out;
+}
+
+@keyframes trp-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+/* Shared section heading, matching the panel-title idiom. */
+.trp-heading {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text-secondary);
+}
+
+.trp-absolute {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 264px;
+  padding: var(--space-3);
+  border-right: 1px solid var(--border-weak);
+}
+
+.trp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.trp-field-label {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.trp-field-input {
+  position: relative;
+  display: flex;
+}
+
+.trp-field input[type='text'] {
+  width: 100%;
+  padding: 7px 32px 7px 10px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.trp-field input[aria-invalid='true'] {
+  border-color: #e5484d80;
+}
+
+.trp-field input[aria-invalid='true']:focus {
+  border-color: #e5484d;
+}
+
+/* Calendar trigger inside the field. */
+.trp-cal {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: flex;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.trp-cal:hover {
+  background: var(--action-hover);
+  color: var(--text-primary);
+}
+
+/* Custom calendar popover (same look in every browser and locale). */
+.trp-field-input .trp-cal-drop {
+  min-width: 0;
+  padding: 0;
+}
+
+.trp-cal-pop {
+  padding: var(--space-2);
+}
+
+.trp-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-1);
+}
+
+.trp-cal-title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.trp-cal-nav {
+  display: flex;
+  padding: 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.trp-cal-nav:hover {
+  background: var(--action-hover);
+  color: var(--text-primary);
+}
+
+.trp-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 28px);
+  gap: 2px;
+}
+
+.trp-dow {
+  padding: 2px 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.trp-day {
+  height: 26px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.trp-day:hover {
+  background: var(--action-hover);
+}
+
+.trp-day.dim {
+  color: var(--text-muted);
+}
+
+.trp-day.today {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.trp-day.selected {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+/* Live summary of the drafted range, or the validation error. */
+.trp-hint {
+  min-height: 1em;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.trp-hint-error {
+  color: #e5484d;
+}
+
+.trp-apply {
+  justify-content: center;
+  margin-top: auto;
+}
+
+.trp-presets {
+  display: flex;
+  flex-direction: column;
+  min-width: 156px;
+  padding-top: var(--space-3);
+}
+
+.trp-presets .trp-heading {
+  padding: 0 var(--space-3);
+}
+
+.trp-preset-list {
+  flex: 1;
+  margin-top: var(--space-1);
+  padding: 0 0 var(--space-1);
+}
+
+.trp-preset {
+  display: block;
+  width: 100%;
+  padding: 5px var(--space-3);
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.trp-preset:hover {
+  background: var(--action-hover);
+}
+
+.trp-preset.active {
+  background: var(--action-selected);
+  color: var(--color-primary-text);
+  font-weight: var(--weight-medium);
+}

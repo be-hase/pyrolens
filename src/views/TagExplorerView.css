@@ -1,0 +1,110 @@
+.tag-explorer-labels {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.tag-explorer-labels-title {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  margin-right: var(--space-1);
+}
+
+.tag-explorer-label {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.tag-explorer-label:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.tag-explorer-label.active {
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border-color: var(--border-strong);
+}
+
+.tag-explorer-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.tag-explorer-table th {
+  text-align: right;
+  padding: var(--space-1) var(--space-2);
+  color: var(--text-secondary);
+  font-weight: var(--weight-medium);
+  border-bottom: 1px solid var(--border-medium);
+  white-space: nowrap;
+}
+
+.tag-explorer-table th.tag-explorer-th-left {
+  text-align: left;
+}
+
+.tag-explorer-table td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border-weak);
+}
+
+.tag-explorer-chip-cell {
+  width: 20px;
+}
+
+.tag-explorer-value-cell {
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-explorer-value-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-family: var(--font-mono);
+  color: var(--color-primary-text);
+  cursor: pointer;
+}
+
+.tag-explorer-value-link:hover {
+  text-decoration: underline;
+}
+
+.tag-explorer-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.tag-explorer-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.tag-explorer-actions button {
+  padding: 2px var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.tag-explorer-actions button:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
