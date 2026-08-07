@@ -4,7 +4,7 @@
     "target": "ES2023",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "ESNext",
-    "types": ["node"],
+    "types": ["node", "vite/client"],
     "skipLibCheck": true,
 
     "moduleResolution": "bundler",
@@ -19,7 +19,15 @@
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noUncheckedSideEffectImports": true,
+    "paths": {
+      "@components/*": ["./src/components/*"],
+      "@hooks/*": ["./src/hooks/*"],
+      "@api/*": ["./src/api/*"],
+      "@lib/*": ["./src/lib/*"],
+      "@views/*": ["./src/views/*"],
+      "@public/*": ["./public/*"]
+    }
   },
-  "include": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx", "vitest.setup.ts"]
 }
