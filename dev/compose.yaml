@@ -14,7 +14,7 @@ services:
     ports: ['4040:4040']
 
   loadgen-a:
-    image: golang:1.25-alpine
+    image: golang:1.26-alpine
     working_dir: /src
     volumes:
       - ./loadgen:/src:ro
@@ -27,7 +27,7 @@ services:
     depends_on: [pyroscope]
 
   loadgen-b:
-    image: golang:1.25-alpine
+    image: golang:1.26-alpine
     working_dir: /src
     volumes:
       - ./loadgen:/src:ro
@@ -46,7 +46,7 @@ services:
     profiles: ['single']
 
   loadgen-single:
-    image: golang:1.25-alpine
+    image: golang:1.26-alpine
     working_dir: /src
     volumes:
       - ./loadgen:/src:ro

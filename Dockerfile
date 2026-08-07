@@ -8,7 +8,7 @@ COPY public ./public
 COPY src ./src
 RUN yarn build
 
-FROM golang:1.25-alpine AS server
+FROM golang:1.26-alpine AS server
 WORKDIR /app
 COPY go.mod main.go ./
 COPY --from=ui /app/dist ./dist
