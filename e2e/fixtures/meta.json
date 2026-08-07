@@ -5,16 +5,16 @@
   "profileType": "process_cpu:cpu:nanoseconds:cpu:nanoseconds",
   "query": "{service_name=\"checkout-service\", profile_type=\"process_cpu:cpu:nanoseconds:cpu:nanoseconds\"}",
   "window": {
-    "start": 1786110720000,
-    "end": 1786111620000
+    "start": 1786145040000,
+    "end": 1786145940000
   },
   "left": {
-    "start": 1786111500000,
-    "end": 1786111560000
+    "start": 1786145820000,
+    "end": 1786145880000
   },
   "right": {
-    "start": 1786111560000,
-    "end": 1786111620000
+    "start": 1786145880000,
+    "end": 1786145940000
   },
   "noTenantStatus": 401
 }

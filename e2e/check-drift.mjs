@@ -58,7 +58,9 @@ for (const name of fixtures) {
   if (before !== after) {
     note(`${name}: shape changed\n    was: ${before}\n    now: ${after}`);
   }
-  if (after.includes('[]')) {
+  // The .empty fixtures are the answer to a selector that matches nothing, so
+  // emptiness is the point of them.
+  if (after.includes('[]') && !name.includes('.empty')) {
     note(`${name}: captured an empty list — the server had no data to give`);
   }
 }

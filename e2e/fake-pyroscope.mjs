@@ -23,11 +23,14 @@ const fixtures = {
   LabelNames: read('LabelNames.json'),
   LabelValues: read('LabelValues.json'),
   SelectMergeStacktraces: read('SelectMergeStacktraces.json'),
+  'SelectMergeStacktraces.empty': read('SelectMergeStacktraces.empty.json'),
   SelectSeries: read('SelectSeries.json'),
   'SelectSeries.grouped': read('SelectSeries.grouped.json'),
+  'SelectSeries.empty': read('SelectSeries.empty.json'),
   Diff: read('Diff.json'),
 };
 const noTenant = read('no-tenant.txt');
+const { service } = JSON.parse(read('meta.json'));
 
 // What the suite asserts against when it needs to know a request really
 // carried something — the tenant header, say, through the Go proxy.
@@ -72,10 +75,16 @@ const server = createServer(async (req, res) => {
   // whether this server wants one.
   if (tenant === '') return json(401, noTenant);
 
-  const key =
-    method === 'SelectSeries' && request.groupBy
-      ? 'SelectSeries.grouped'
-      : method;
+  // A selector naming some other service gets the empty answer the server
+  // really gives, so the UI's "no data" state is reachable on purpose rather
+  // than only during the moment before a response lands.
+  const selector = request.labelSelector ?? request.left?.labelSelector ?? '';
+  const matches = !selector || selector.includes(service);
+
+  let key = method;
+  if (method === 'SelectSeries' && request.groupBy)
+    key = 'SelectSeries.grouped';
+  if (!matches && fixtures[`${method}.empty`]) key = `${method}.empty`;
   const fixture = fixtures[key];
   if (!fixture) {
     return json(

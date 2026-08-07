@@ -21,6 +21,13 @@ inside the browser, so a request really does travel through the Go proxy —
 which is how the suite can assert that the tenant header arrived, by reading
 the fake upstream's request log back over `/__log`.
 
+The fake replays one fixture per method, with two exceptions it reads out of
+the request: a `groupBy` gets the grouped timeline, and a selector naming some
+other service gets the `.empty` answer the real server gives for one. That
+second case exists because the UI's "no data" placeholder is also shown for
+the moment before the first response lands, so a test that only waits for it
+to appear passes whatever the answer turns out to be.
+
 **The fixtures decide the time range, not the clock.** `fixtures/meta.json`
 records the window the capture was taken with, and `helpers.ts` builds every
 URL from it. Pin a range by hand instead and the points land off their own
