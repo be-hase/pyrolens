@@ -1,0 +1,20 @@
+{
+  "capturedFrom": "http://localhost:4040",
+  "tenant": "team-a",
+  "service": "checkout-service",
+  "profileType": "process_cpu:cpu:nanoseconds:cpu:nanoseconds",
+  "query": "{service_name=\"checkout-service\", profile_type=\"process_cpu:cpu:nanoseconds:cpu:nanoseconds\"}",
+  "window": {
+    "start": 1786110720000,
+    "end": 1786111620000
+  },
+  "left": {
+    "start": 1786111500000,
+    "end": 1786111560000
+  },
+  "right": {
+    "start": 1786111560000,
+    "end": 1786111620000
+  },
+  "noTenantStatus": 401
+}
