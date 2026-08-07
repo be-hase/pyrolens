@@ -38,22 +38,8 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-func main() {
-	listen := flag.String("listen", envOr("LISTEN", ":4041"), "address to listen on (env: LISTEN)")
-	pyroscopeURL := flag.String("pyroscope-url", envOr("PYROSCOPE_URL", "http://localhost:4040"), "Pyroscope server base URL (env: PYROSCOPE_URL)")
-	showVersion := flag.Bool("version", false, "print the version and exit")
-	flag.Parse()
-
-	if *showVersion {
-		fmt.Println("pyrolens", version)
-		return
-	}
-
-	target, err := url.Parse(*pyroscopeURL)
-	if err != nil || target.Scheme == "" || target.Host == "" {
-		log.Fatalf("invalid -pyroscope-url %q", *pyroscopeURL)
-	}
-
+// newProxy builds the reverse proxy to the Pyroscope server.
+func newProxy(target *url.URL) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	director := proxy.Director
 	proxy.Director = func(req *http.Request) {
@@ -66,6 +52,8 @@ func main() {
 	transport.ResponseHeaderTimeout = 2 * time.Minute
 	proxy.Transport = transport
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		// The detail is for whoever runs the server; the browser gets a
+		// sentence, since it may be showing it to someone else's user.
 		log.Printf("proxy error: %s %s: %v", r.Method, r.URL.Path, err)
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
@@ -74,15 +62,12 @@ func main() {
 		}
 		http.Error(w, "upstream pyroscope unreachable", http.StatusBadGateway)
 	}
+	return proxy
+}
 
-	dist, err := fs.Sub(distFS, "dist")
-	if err != nil {
-		log.Fatal(err)
-	}
-	index, err := fs.ReadFile(dist, "index.html")
-	if err != nil {
-		log.Fatalf("embedded UI missing (build it with `yarn build` before `go build`): %v", err)
-	}
+// newHandler routes the query API to Pyroscope and everything else to the
+// embedded UI, whose shell is `index`.
+func newHandler(dist fs.FS, index []byte, proxy http.Handler) http.Handler {
 	fileServer := http.FileServer(http.FS(dist))
 
 	mux := http.NewServeMux()
@@ -122,10 +107,37 @@ func main() {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Write(index)
 	})
+	return mux
+}
+
+func main() {
+	listen := flag.String("listen", envOr("LISTEN", ":4041"), "address to listen on (env: LISTEN)")
+	pyroscopeURL := flag.String("pyroscope-url", envOr("PYROSCOPE_URL", "http://localhost:4040"), "Pyroscope server base URL (env: PYROSCOPE_URL)")
+	showVersion := flag.Bool("version", false, "print the version and exit")
+	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("pyrolens", version)
+		return
+	}
+
+	target, err := url.Parse(*pyroscopeURL)
+	if err != nil || target.Scheme == "" || target.Host == "" {
+		log.Fatalf("invalid -pyroscope-url %q", *pyroscopeURL)
+	}
+
+	dist, err := fs.Sub(distFS, "dist")
+	if err != nil {
+		log.Fatal(err)
+	}
+	index, err := fs.ReadFile(dist, "index.html")
+	if err != nil {
+		log.Fatalf("embedded UI missing (build it with `yarn build` before `go build`): %v", err)
+	}
 
 	server := &http.Server{
 		Addr:              *listen,
-		Handler:           mux,
+		Handler:           newHandler(dist, index, newProxy(target)),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       time.Minute,
 		WriteTimeout:      5 * time.Minute,

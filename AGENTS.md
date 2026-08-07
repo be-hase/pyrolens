@@ -52,6 +52,8 @@ yarn format         # prettier --check   (format:fix to write)
 yarn test           # node:test unit tests
 yarn build          # -> dist/
 
+go test ./...       # server tests (needs dist/, see above)
+
 make build          # yarn build + go build -o pyrolens
 make run            # build, then serve on :4041
 make docker         # local image
