@@ -11,10 +11,11 @@
   minimumReleaseAge: '7 days',
   labels: ['renovate'],
   packageRules: [
-    // The four runtime dependencies are the ones a bump can actually break for
-    // users, and the UI has no tests that would catch a rendering regression.
-    // Review those by hand; everything else (devDependencies, Actions, base
-    // images, the load generator) can merge itself once CI is green.
+    // The four runtime dependencies are the ones a bump can actually break
+    // for users, and CI cannot see all of it: the unit and browser tests say
+    // the app still works, not that it still looks right. Review those by
+    // hand; everything else (devDependencies, Actions, base images, the load
+    // generator) can merge itself once CI is green.
     {
       matchManagers: ['npm'],
       matchDepTypes: ['dependencies'],
