@@ -1,0 +1,24 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: ['config:recommended'],
+  automerge: true,
+  major: {
+    automerge: false,
+  },
+  // Supply chain mitigation: don't pick up a release until it has been public for a while,
+  // so compromised versions are usually detected and unpublished before automerge sees them.
+  // Renovate's vulnerabilityAlerts updates bypass this delay by default.
+  minimumReleaseAge: '7 days',
+  labels: ['renovate'],
+  packageRules: [
+    // The four runtime dependencies are the ones a bump can actually break for
+    // users, and the UI has no tests that would catch a rendering regression.
+    // Review those by hand; everything else (devDependencies, Actions, base
+    // images, the load generator) can merge itself once CI is green.
+    {
+      matchManagers: ['npm'],
+      matchDepTypes: ['dependencies'],
+      automerge: false,
+    },
+  ],
+}
