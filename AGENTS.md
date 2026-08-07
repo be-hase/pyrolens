@@ -168,7 +168,10 @@ Report honestly what you ran and what you did not.
 
 ## Conventions
 
-- Node 24 and Go 1.25, both pinned by mise; yarn 4 via corepack.
+- Node 24 and Go 1.25, both pinned by mise; yarn 4 via corepack. **Node 25
+  dropped corepack from the distribution**, so a bump past 24 has to install
+  it first (`npm i -g corepack`) wherever `corepack enable` runs — CI, the
+  Dockerfile and the GoReleaser hooks. CI fails loudly if this is missed.
 - TypeScript is strict with `erasableSyntaxOnly`, so **`enum` does not
   compile** — use `const X = {…} as const` with a matching type alias.
 - Prettier and eslint are CI gates (single quotes, semicolons, trailing
