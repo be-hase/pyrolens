@@ -23,6 +23,9 @@ permissions:
 jobs:
   capture:
     runs-on: ubuntu-latest
+    # A cold stack needs about five minutes before anything is queryable, and
+    # a runner is slower than that; this is the backstop, not the budget.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
@@ -31,9 +34,13 @@ jobs:
       - name: start a Pyroscope with data in it
         run: docker compose -f dev/compose.yaml up -d
       - name: capture
-        # capture.mjs waits for the load generator's profiles to become
-        # queryable, which takes a couple of minutes.
+        # From cold the load generator is downloaded and compiled inside its
+        # container before it reports anything, so this waits minutes, not
+        # seconds.
         run: OUT=/tmp/fresh node e2e/capture.mjs
+      - name: what the stack was doing
+        if: failure()
+        run: docker compose -f dev/compose.yaml logs --tail=40
       - name: compare against the committed fixtures
         run: FRESH=/tmp/fresh/ node e2e/check-drift.mjs
       - if: failure()

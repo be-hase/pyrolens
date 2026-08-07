@@ -21,6 +21,7 @@ const OUT = process.env.OUT ?? 'e2e/fixtures';
 const SERVICE = process.env.APP ?? 'checkout-service';
 const PROFILE_TYPE = 'process_cpu:cpu:nanoseconds:cpu:nanoseconds';
 const BASE = '/querier.v1.QuerierService';
+const WAIT_MINUTES = Number(process.env.WAIT_MINUTES ?? 15);
 
 // Minute-aligned, because the load generator adds its slowRegression frame
 // every other minute: two adjacent minutes are what gives Comparison and
@@ -64,9 +65,14 @@ async function save(name, { status, text }, { expect = 200 } = {}) {
  * Waits until the load generator's profiles are queryable. `docker compose up
  * -d` returns before the server is listening, so a connection error here is
  * just another reason to keep waiting.
+ *
+ * From cold this takes about five minutes: the load generator is compiled
+ * inside its container, so the first run also downloads its module cache, and
+ * Pyroscope only answers for a profile once it has been flushed. A warm stack
+ * is ready in about one.
  */
 async function waitForData() {
-  const deadline = Date.now() + 5 * 60_000;
+  const deadline = Date.now() + WAIT_MINUTES * 60_000;
   for (;;) {
     let reason = '';
     try {
@@ -88,7 +94,7 @@ async function waitForData() {
     }
     if (Date.now() > deadline) {
       throw new Error(
-        `gave up waiting for ${SERVICE} after 5 minutes: ${reason}`,
+        `gave up waiting for ${SERVICE} after ${WAIT_MINUTES} minutes: ${reason}`,
       );
     }
     console.log(`waiting for ${SERVER}: ${reason}`);
