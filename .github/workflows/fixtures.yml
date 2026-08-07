@@ -34,9 +34,9 @@ jobs:
       - name: start a Pyroscope with data in it
         run: docker compose -f dev/compose.yaml up -d
       - name: capture
-        # From cold the load generator is downloaded and compiled inside its
-        # container before it reports anything, so this waits minutes, not
-        # seconds.
+        # About five minutes from cold: the load generator is compiled inside
+        # its container before it reports anything, and capture then lets a
+        # few more minutes accumulate so the Diff windows are populated.
         run: OUT=/tmp/fresh node e2e/capture.mjs
       - name: what the stack was doing
         if: failure()

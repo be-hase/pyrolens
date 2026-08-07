@@ -22,15 +22,26 @@ const SERVICE = process.env.APP ?? 'checkout-service';
 const PROFILE_TYPE = 'process_cpu:cpu:nanoseconds:cpu:nanoseconds';
 const BASE = '/querier.v1.QuerierService';
 const WAIT_MINUTES = Number(process.env.WAIT_MINUTES ?? 15);
+const SETTLE_MINUTES = Number(process.env.SETTLE_MINUTES ?? 3);
+
+const MINUTE = 60_000;
 
 // Minute-aligned, because the load generator adds its slowRegression frame
-// every other minute: two adjacent minutes are what gives Comparison and
-// Diff something real to show.
-const MINUTE = 60_000;
-const end = Math.floor(Date.now() / MINUTE) * MINUTE;
-const window = { start: end - 15 * MINUTE, end };
-const right = { start: end - MINUTE, end };
-const left = { start: end - 2 * MINUTE, end: end - MINUTE };
+// every other minute: two adjacent minutes are what gives Comparison and Diff
+// something real to show.
+//
+// Computed against the clock at the moment of use, never once at startup: a
+// cold stack takes minutes to produce anything, and a window fixed before
+// then ends before the first profile exists — which is a wait that can only
+// time out.
+function windowsAt(nowMs) {
+  const end = Math.floor(nowMs / MINUTE) * MINUTE;
+  return {
+    window: { start: end - 15 * MINUTE, end },
+    right: { start: end - MINUTE, end },
+    left: { start: end - 2 * MINUTE, end: end - MINUTE },
+  };
+}
 
 const selector = `{service_name="${SERVICE}"}`;
 const profile = (range) => ({
@@ -77,7 +88,7 @@ async function waitForData() {
     let reason = '';
     try {
       const { status, text } = await post('Series', {
-        ...window,
+        ...windowsAt(Date.now()).window,
         matchers: ['{}'],
         labelNames: ['service_name', '__profile_type__'],
       });
@@ -102,9 +113,27 @@ async function waitForData() {
   }
 }
 
+/** Lets more minutes of profiles accumulate before the windows are pinned. */
+async function settle(minutes) {
+  for (let left = minutes; left > 0; left--) {
+    console.log(`letting ${left} more minute(s) of profiles accumulate...`);
+    await new Promise((r) => setTimeout(r, MINUTE));
+  }
+}
+
 await mkdir(OUT, { recursive: true });
 console.log(`capturing from ${SERVER} as ${TENANT || '(no tenant)'}`);
 await waitForData();
+
+// Both of the adjacent minutes the Diff fixture compares have to contain
+// something, and one of them has to be a slowRegression minute, so let a few
+// more go by before pinning the windows.
+await settle(SETTLE_MINUTES);
+const { window, left, right } = windowsAt(Date.now());
+console.log(
+  `window ${new Date(window.start).toISOString()} .. ` +
+    `${new Date(window.end).toISOString()}`,
+);
 
 await save(
   'Series',

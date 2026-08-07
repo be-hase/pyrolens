@@ -39,11 +39,16 @@ node e2e/capture.mjs                 # waits for profiles, then writes fixtures/
 docker compose -f dev/compose.yaml down -v
 ```
 
-Expect to wait. From cold that is about five minutes — the load generator is
-compiled inside its container, so the first run downloads its module cache
-too, and Pyroscope only answers for a profile once it has been flushed. A
-stack that is already warm is ready in about one. `WAIT_MINUTES` moves the
-deadline capture gives up at.
+Expect to wait about five minutes from cold: roughly two before anything is
+queryable — the load generator is compiled inside its container, so a fresh
+run downloads its module cache first — and then three more on purpose, so
+that both of the adjacent minutes the Diff fixture compares have profiles in
+them and one of them is a `slowRegression` minute.
+
+`WAIT_MINUTES` moves the deadline it gives up at; `SETTLE_MINUTES` moves the
+second part. The windows are computed from the clock *after* the wait, never
+before it — a window pinned at startup ends before a cold stack has produced
+anything, and then no amount of waiting can satisfy it.
 
 `capture.mjs` picks two adjacent minute-aligned windows, because the load
 generator adds a `slowRegression` frame every other minute — that is what
