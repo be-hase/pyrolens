@@ -99,3 +99,82 @@ export function formatTickTime(tsMs: number, stepMs: number): string {
   const hhmm = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
   return stepMs < MINUTE ? `${hhmm}:${pad2(d.getSeconds())}` : hhmm;
 }
+
+// --- Plot geometry -----------------------------------------------------------
+//
+// Both charts map a time range across their width and a value range up their
+// height. Value 0 sits at `height - padBottom` and the axis maximum at
+// `padTop`; the gridlines and the y-axis labels use the same mapping as the
+// marks, which is what keeps a peak drawn on a gridline worth that
+// gridline's number.
+
+/** Vertical geometry of a plot, in CSS pixels. */
+export interface PlotBox {
+  height: number;
+  padTop: number;
+  padBottom: number;
+}
+
+/** Both charts leave the same room above and below the plotted area. */
+export const PLOT_PAD_TOP = 10;
+export const PLOT_PAD_BOTTOM = 4;
+
+const innerHeight = (box: PlotBox) => box.height - box.padTop - box.padBottom;
+
+/** X of a timestamp, in pixels across a plot `width` wide. */
+export function timeToX(
+  tsMs: number,
+  startMs: number,
+  durationMs: number,
+  width: number,
+): number {
+  return ((tsMs - startMs) / Math.max(1, durationMs)) * width;
+}
+
+/**
+ * The inverse of `timeToX`, to whole milliseconds. Drag-to-select navigates
+ * to what this returns, so it has to land back on the timestamp under the
+ * pointer.
+ */
+export function xToTime(
+  px: number,
+  startMs: number,
+  durationMs: number,
+  width: number,
+): number {
+  return Math.round(
+    startMs + (px / Math.max(1, width)) * Math.max(1, durationMs),
+  );
+}
+
+/** Y of a value already in display units. */
+export function valueToY(
+  displayValue: number,
+  displayMax: number,
+  box: PlotBox,
+): number {
+  const frac = displayMax > 0 ? displayValue / displayMax : 0;
+  return box.height - box.padBottom - Math.min(1, frac) * innerHeight(box);
+}
+
+/** Y of a gridline at `frac` of the axis maximum (0 = baseline, 1 = top). */
+export function fractionToY(frac: number, box: PlotBox): number {
+  return box.height - box.padBottom - frac * innerHeight(box);
+}
+
+/**
+ * Round tick timestamps covering the range, at `stepMs` apart — which must be
+ * positive, as `tickStepMs` guarantees.
+ */
+export function axisTicks(
+  startMs: number,
+  durationMs: number,
+  stepMs: number,
+): number[] {
+  const out: number[] = [];
+  const end = startMs + durationMs;
+  for (let ts = Math.ceil(startMs / stepMs) * stepMs; ts <= end; ts += stepMs) {
+    out.push(ts);
+  }
+  return out;
+}
