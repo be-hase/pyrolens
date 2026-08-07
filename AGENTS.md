@@ -91,7 +91,11 @@ the binaries and the image.
   Library, and `node:assert/strict` for the assertions.
 - `e2e/` — browser tests against the real binary, with a fake Pyroscope
   replaying responses captured from a real one. See `e2e/README.md` before
-  touching the fixtures.
+  touching the fixtures; a scheduled job re-captures against a live server and
+  fails when the responses no longer have the shape they were recorded with.
+- `src/components/timeseries-utils.ts`, `src/views/tagExplorerData.ts` — the
+  arithmetic both charts and the breakdown table would otherwise hide inside a
+  component, kept out here so it can be checked directly.
 
 ## Rules that are easy to break
 

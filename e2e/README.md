@@ -49,6 +49,27 @@ Review the diff before committing it: a fixture changing shape is a fact
 about the server worth noticing, not noise. They are excluded from prettier
 (`.prettierignore`) so the bytes stay as they arrived.
 
+## The drift guard
+
+A replayed fixture keeps passing however far the real server moves away from
+it, and the Pyroscope version is bumped automatically — so nothing here would
+notice on its own. `.github/workflows/fixtures.yml` captures against a live
+server weekly, and on any pull request that touches the image or the fixtures,
+then runs:
+
+```console
+FRESH=/tmp/fresh node e2e/check-drift.mjs
+```
+
+It compares *structure*, since values differ on every capture: which keys
+exist and what type each holds. It also checks the two things a shape
+comparison would miss — that the capture is not silently empty, and that the
+multitenant refusal still says something the UI's probe recognises, since that
+is matched with `/org|tenant/i` rather than by status alone.
+
+When it fails, the fresh capture is uploaded as an artifact so the diff can be
+read before deciding whether to re-record.
+
 ## What is deliberately not here
 
 Screenshot comparison. Canvas output differs with the platform's font

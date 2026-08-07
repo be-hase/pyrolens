@@ -60,26 +60,38 @@ async function save(name, { status, text }, { expect = 200 } = {}) {
   return JSON.parse(text);
 }
 
-/** Waits until the load generator's profiles are queryable. */
+/**
+ * Waits until the load generator's profiles are queryable. `docker compose up
+ * -d` returns before the server is listening, so a connection error here is
+ * just another reason to keep waiting.
+ */
 async function waitForData() {
   const deadline = Date.now() + 5 * 60_000;
   for (;;) {
-    const { status, text } = await post('Series', {
-      ...window,
-      matchers: ['{}'],
-      labelNames: ['service_name', '__profile_type__'],
-    });
-    const found =
-      status === 200 && JSON.parse(text).labelsSet?.length > 0
-        ? JSON.parse(text).labelsSet.some((s) =>
-            s.labels?.some((l) => l.value === SERVICE),
-          )
-        : false;
-    if (found) return;
-    if (Date.now() > deadline) {
-      throw new Error(`no profiles for ${SERVICE} after 5 minutes`);
+    let reason = '';
+    try {
+      const { status, text } = await post('Series', {
+        ...window,
+        matchers: ['{}'],
+        labelNames: ['service_name', '__profile_type__'],
+      });
+      if (status === 200) {
+        const sets = JSON.parse(text).labelsSet ?? [];
+        if (sets.some((s) => s.labels?.some((l) => l.value === SERVICE)))
+          return;
+        reason = `no profiles for ${SERVICE} yet`;
+      } else {
+        reason = `HTTP ${status}`;
+      }
+    } catch (e) {
+      reason = e instanceof Error ? e.message : String(e);
     }
-    console.log('waiting for profiles to become queryable...');
+    if (Date.now() > deadline) {
+      throw new Error(
+        `gave up waiting for ${SERVICE} after 5 minutes: ${reason}`,
+      );
+    }
+    console.log(`waiting for ${SERVER}: ${reason}`);
     await new Promise((r) => setTimeout(r, 10_000));
   }
 }
