@@ -2,11 +2,18 @@ import { useMemo, useRef, useState } from 'react';
 import { Empty } from '@components/core/Empty';
 import { profileTypeUnit } from '@api/client';
 import {
-  toDisplayValue,
-  niceMax,
-  yAxisFormatter,
-  tickStepMs,
+  axisTicks,
   formatTickTime,
+  fractionToY,
+  niceMax,
+  PLOT_PAD_BOTTOM,
+  PLOT_PAD_TOP,
+  tickStepMs,
+  timeToX,
+  toDisplayValue,
+  valueToY,
+  yAxisFormatter,
+  type PlotBox,
 } from './timeseries-utils';
 import { SERIES_COLORS } from './seriesColors';
 import './TimeSeries.css';
@@ -33,6 +40,11 @@ export function MultiTimeSeries({
 }) {
   const W = 800;
   const H = 140;
+  const BOX: PlotBox = {
+    height: H,
+    padTop: PLOT_PAD_TOP,
+    padBottom: PLOT_PAD_BOTTOM,
+  };
   const durationMs = endMs - startMs;
 
   const svgRef = useRef<SVGSVGElement>(null);
@@ -49,9 +61,8 @@ export function MultiTimeSeries({
   // One shared scale for lines AND axis labels, in display units, so a peak
   // drawn at a gridline reads as that gridline's value.
   const displayMax = niceMax(toDisplayValue(max, unit));
-  const x = (ts: number) => ((ts - startMs) / durationMs) * W;
-  const y = (v: number) =>
-    H - 4 - (toDisplayValue(v, unit) / displayMax) * (H - 14);
+  const x = (ts: number) => timeToX(ts, startMs, durationMs, W);
+  const y = (v: number) => valueToY(toDisplayValue(v, unit), displayMax, BOX);
 
   const paths = series.map((s) =>
     s.points.length
@@ -65,14 +76,13 @@ export function MultiTimeSeries({
 
   const stepMs = tickStepMs(durationMs);
   const ticks: { x: number; label: string }[] = [];
-  const firstTick = Math.ceil(startMs / stepMs) * stepMs;
-  for (let ts = firstTick; ts <= endMs; ts += stepMs) {
+  for (const ts of axisTicks(startMs, durationMs, stepMs)) {
     ticks.push({ x: x(ts), label: formatTickTime(ts, stepMs) });
   }
 
   const fmt = yAxisFormatter(displayMax);
   const yTicks = [0, 0.5, 1].map((v) => ({
-    y: H - 4 - v * (H - 14),
+    y: fractionToY(v, BOX),
     label: fmt(v * displayMax),
   }));
 

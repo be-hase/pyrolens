@@ -9,20 +9,32 @@ import tinycolor from 'tinycolor2';
 import { profileTypeUnit, type Point } from '@api/client';
 import type { TimeRange } from '../time';
 import {
+  axisTicks,
   formatTickTime,
+  fractionToY,
   niceMax,
+  PLOT_PAD_BOTTOM,
+  PLOT_PAD_TOP,
   tickStepMs,
+  timeToX,
   toDisplayValue,
+  valueToY,
+  xToTime,
   yAxisFormatter,
+  type PlotBox,
 } from './timeseries-utils';
 import './TimeSeries.css';
 
 // Canvas geometry in CSS pixels. Value 0 sits at PLOT_H - PAD_BOTTOM and the
 // axis maximum at PAD_TOP; the y-axis labels use the same mapping.
 const PLOT_H = 100;
-const PAD_TOP = 10;
-const PAD_BOTTOM = 4;
-const INNER_H = PLOT_H - PAD_TOP - PAD_BOTTOM;
+const PAD_TOP = PLOT_PAD_TOP;
+const PAD_BOTTOM = PLOT_PAD_BOTTOM;
+const BOX: PlotBox = {
+  height: PLOT_H,
+  padTop: PAD_TOP,
+  padBottom: PAD_BOTTOM,
+};
 const Y_FRACTIONS = [0, 0.5, 1];
 const MIN_DRAG_PX = 4;
 
@@ -96,17 +108,10 @@ export function TimeSeries({
   const fmt = yAxisFormatter(displayMax);
 
   const stepMs = tickStepMs(durationMs);
-  const ticks = useMemo(() => {
-    const out: number[] = [];
-    for (
-      let ts = Math.ceil(startMs / stepMs) * stepMs;
-      ts <= startMs + durationMs;
-      ts += stepMs
-    ) {
-      out.push(ts);
-    }
-    return out;
-  }, [startMs, durationMs, stepMs]);
+  const ticks = useMemo(
+    () => axisTicks(startMs, durationMs, stepMs),
+    [startMs, durationMs, stepMs],
+  );
 
   // Keep the canvas backing store in sync with the rendered chart width.
   useEffect(() => {
@@ -159,9 +164,8 @@ export function TimeSeries({
       'rgba(255, 255, 255, 0.22)',
     );
 
-    const x = (ts: number) => ((ts - startMs) / durationMs) * width;
-    const y = (v: number) =>
-      PLOT_H - PAD_BOTTOM - Math.min(1, v / displayMax) * INNER_H;
+    const x = (ts: number) => timeToX(ts, startMs, durationMs, width);
+    const y = (v: number) => valueToY(v, displayMax, BOX);
     const clampX = (px: number) => Math.max(0, Math.min(width, px));
 
     // Gridlines.
@@ -169,7 +173,7 @@ export function TimeSeries({
     ctx.strokeStyle = gridColor;
     ctx.beginPath();
     for (const frac of Y_FRACTIONS) {
-      const gy = Math.round(PLOT_H - PAD_BOTTOM - frac * INNER_H) + 0.5;
+      const gy = Math.round(fractionToY(frac, BOX)) + 0.5;
       ctx.moveTo(0, gy);
       ctx.lineTo(width, gy);
     }
@@ -298,8 +302,7 @@ export function TimeSeries({
     return Math.max(0, Math.min(rect.width, e.clientX - rect.left));
   };
 
-  const pxToMs = (px: number) =>
-    Math.round(startMs + (px / Math.max(1, width)) * durationMs);
+  const pxToMs = (px: number) => xToTime(px, startMs, durationMs, width);
 
   return (
     <div className="timeseries">
@@ -308,7 +311,7 @@ export function TimeSeries({
           <span
             key={frac}
             className="timeseries-y-label"
-            style={{ top: PLOT_H - PAD_BOTTOM - frac * INNER_H }}
+            style={{ top: fractionToY(frac, BOX) }}
           >
             {fmt(frac * displayMax)}
           </span>

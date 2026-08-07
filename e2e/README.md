@@ -39,6 +39,17 @@ node e2e/capture.mjs                 # waits for profiles, then writes fixtures/
 docker compose -f dev/compose.yaml down -v
 ```
 
+Expect to wait about five minutes from cold: roughly two before anything is
+queryable — the load generator is compiled inside its container, so a fresh
+run downloads its module cache first — and then three more on purpose, so
+that both of the adjacent minutes the Diff fixture compares have profiles in
+them and one of them is a `slowRegression` minute.
+
+`WAIT_MINUTES` moves the deadline it gives up at; `SETTLE_MINUTES` moves the
+second part. The windows are computed from the clock *after* the wait, never
+before it — a window pinned at startup ends before a cold stack has produced
+anything, and then no amount of waiting can satisfy it.
+
 `capture.mjs` picks two adjacent minute-aligned windows, because the load
 generator adds a `slowRegression` frame every other minute — that is what
 gives Comparison and Diff a real difference to show. It also captures the
@@ -48,6 +59,27 @@ UI's tenancy probe reads.
 Review the diff before committing it: a fixture changing shape is a fact
 about the server worth noticing, not noise. They are excluded from prettier
 (`.prettierignore`) so the bytes stay as they arrived.
+
+## The drift guard
+
+A replayed fixture keeps passing however far the real server moves away from
+it, and the Pyroscope version is bumped automatically — so nothing here would
+notice on its own. `.github/workflows/fixtures.yml` captures against a live
+server weekly, and on any pull request that touches the image or the fixtures,
+then runs:
+
+```console
+FRESH=/tmp/fresh node e2e/check-drift.mjs
+```
+
+It compares *structure*, since values differ on every capture: which keys
+exist and what type each holds. It also checks the two things a shape
+comparison would miss — that the capture is not silently empty, and that the
+multitenant refusal still says something the UI's probe recognises, since that
+is matched with `/org|tenant/i` rather than by status alone.
+
+When it fails, the fresh capture is uploaded as an artifact so the diff can be
+read before deciding whether to re-record.
 
 ## What is deliberately not here
 

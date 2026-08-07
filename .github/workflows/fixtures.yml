@@ -1,0 +1,53 @@
+name: Fixture drift
+
+# The e2e suite replays recorded responses, so it keeps passing however far
+# the real Pyroscope moves away from them — and the version it is recorded
+# from (dev/compose.yaml) is bumped automatically. This is what notices.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # Mondays, 06:00 UTC
+  workflow_dispatch:
+  # A bump to the Pyroscope image is exactly the change that can invalidate
+  # them, so check it before it merges rather than a week later.
+  pull_request:
+    paths:
+      - 'dev/compose.yaml'
+      - 'e2e/fixtures/**'
+      - 'e2e/capture.mjs'
+      - 'e2e/check-drift.mjs'
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    # A cold stack needs about five minutes before anything is queryable, and
+    # a runner is slower than that; this is the backstop, not the budget.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: '24'
+      - name: start a Pyroscope with data in it
+        run: docker compose -f dev/compose.yaml up -d
+      - name: capture
+        # About five minutes from cold: the load generator is compiled inside
+        # its container before it reports anything, and capture then lets a
+        # few more minutes accumulate so the Diff windows are populated.
+        run: OUT=/tmp/fresh node e2e/capture.mjs
+      - name: what the stack was doing
+        if: failure()
+        run: docker compose -f dev/compose.yaml logs --tail=40
+      - name: compare against the committed fixtures
+        run: FRESH=/tmp/fresh/ node e2e/check-drift.mjs
+      - if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fresh-fixtures
+          path: /tmp/fresh/
+          retention-days: 14
+      - if: always()
+        run: docker compose -f dev/compose.yaml down -v

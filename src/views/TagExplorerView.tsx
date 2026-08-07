@@ -10,19 +10,9 @@ import {
   fetchLabelNames,
   profileTypeUnit,
 } from '@api/client';
-import {
-  isInternalLabel,
-  splitQuery,
-  toDisplayLabel,
-  toInternalLabel,
-  upsertMatcher,
-} from '../queryLang';
+import { splitQuery, toInternalLabel, upsertMatcher } from '../queryLang';
 import { timelineStep } from '../time';
-import {
-  toDisplayValue,
-  yAxisFormatter,
-  niceMax,
-} from '@components/timeseries-utils';
+import { formatCell, groupByLabels, summarize } from './tagExplorerData';
 import { navigate, useRoute } from '../urlState';
 import './TagExplorerView.css';
 
@@ -59,19 +49,8 @@ export function TagExplorerView({
     const controller = new AbortController();
     fetchLabelNames([labelSelector], range.start, range.end, controller.signal)
       .then((names) => {
-        // profile_type and service_name are already pinned by the query
-        // itself, so grouping by them is never useful.
-        const usable = names
-          .map(toDisplayLabel)
-          .filter(
-            (n) =>
-              !isInternalLabel(n) &&
-              n !== 'service_name' &&
-              n !== 'profile_type',
-          )
-          .sort();
         if (!controller.signal.aborted) {
-          setLabels(usable);
+          setLabels(groupByLabels(names));
           setLabelsError(null);
         }
       })
@@ -124,29 +103,10 @@ export function TagExplorerView({
     return () => controller.abort();
   }, [active, profileTypeID, labelSelector, groupBy, range, tenantID]);
 
-  const rows = useMemo(() => {
-    const totals = series.map((s) => ({
-      label: s.label,
-      sum: s.points.reduce((acc, p) => acc + p.value, 0),
-      avg: s.points.length
-        ? s.points.reduce((acc, p) => acc + p.value, 0) / s.points.length
-        : 0,
-      max: Math.max(0, ...s.points.map((p) => p.value)),
-    }));
-    const grandTotal = totals.reduce((acc, t) => acc + t.sum, 0);
-    return totals
-      .map((t) => ({
-        ...t,
-        share: grandTotal ? (t.sum / grandTotal) * 100 : 0,
-      }))
-      .sort((a, b) => b.sum - a.sum);
-  }, [series]);
+  const rows = useMemo(() => summarize(series), [series]);
 
   const unit = profileTypeUnit(profileTypeID);
-  const fmt = (v: number) => {
-    const dv = toDisplayValue(v, unit);
-    return yAxisFormatter(niceMax(dv))(dv);
-  };
+  const fmt = (v: number) => formatCell(v, unit);
 
   const selectRow = (value: string) => {
     navigate({
