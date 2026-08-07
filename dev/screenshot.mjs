@@ -2,9 +2,9 @@
 // as a picture instead of a claim. Needs a Pyrolens serving data — see
 // dev/README.md.
 //
-// Playwright is deliberately not a dependency of this project: install it
-// into a scratch directory and point PLAYWRIGHT at it (dev/README.md has the
-// exact commands). Writes dev/screenshots/<view>-<theme>.png.
+// Playwright ships with the e2e suite, but its browsers do not — run
+// `yarn playwright install chromium` once. PLAYWRIGHT points the import at an
+// installation elsewhere. Writes dev/screenshots/<view>-<theme>.png.
 
 import { mkdir } from 'node:fs/promises';
 

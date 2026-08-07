@@ -50,6 +50,7 @@ yarn type-check     # tsc -b
 yarn lint           # eslint
 yarn format         # prettier --check   (format:fix to write)
 yarn test           # vitest: units, hooks and components (jsdom)
+yarn test:e2e       # playwright: the real binary against captured fixtures
 yarn build          # -> dist/
 
 go test ./...       # server tests (needs dist/, see above)
@@ -88,6 +89,9 @@ the binaries and the image.
 - `vitest.config.ts` — the test setup, built on `vite.config.ts` so tests
   resolve imports and compile TSX the way the bundle does. jsdom, Testing
   Library, and `node:assert/strict` for the assertions.
+- `e2e/` — browser tests against the real binary, with a fake Pyroscope
+  replaying responses captured from a real one. See `e2e/README.md` before
+  touching the fixtures.
 
 ## Rules that are easy to break
 
@@ -151,9 +155,14 @@ fine in a quick test.
 
 ## Verifying a change
 
-Type-checking and unit tests do not catch a wrong wire field, a broken canvas
-transform, or a control that stopped applying. For anything beyond a pure
-function:
+`yarn test:e2e` now covers some of what unit tests cannot — a view that stopped
+rendering, a canvas left blank, a control that no longer writes to the URL, a
+renamed wire field — because it drives the real binary against bytes a real
+Pyroscope sent. Run it for anything beyond a pure function.
+
+It does not replace looking at the thing. It cannot tell you a chart is
+mis-scaled, a colour is unreadable, or a layout broke, and its fixtures are a
+snapshot rather than a live server. So for a change of any substance:
 
 1. **Bring up a Pyroscope with data in it.**
    `docker compose -f dev/compose.yaml up -d` starts one and feeds it
@@ -168,6 +177,10 @@ function:
    build time, so a stale process serves a stale app and every conclusion
    drawn from it is wrong. Rebuild, restart, and check that the asset hash
    the server returns matches `dist/`.
+
+When a change touches what the server sends or how it is decoded, re-record
+the fixtures (`e2e/README.md`) rather than editing them by hand — a
+hand-written fixture only proves the code agrees with itself.
 
 Report honestly what you ran and what you did not.
 

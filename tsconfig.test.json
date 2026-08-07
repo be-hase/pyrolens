@@ -29,5 +29,10 @@
       "@public/*": ["./public/*"]
     }
   },
-  "include": ["src/**/*.test.ts", "src/**/*.test.tsx", "vitest.setup.ts"]
+  "include": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "vitest.setup.ts",
+    "e2e/**/*.ts"
+  ]
 }

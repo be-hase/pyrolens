@@ -56,23 +56,19 @@ binary's.
 
 For a visual change, review the pictures rather than the claim:
 
-Playwright is not a dependency of this project — it would be a heavy install
-for everyone who only wants to build the UI. Put it in a scratch directory
-instead (once):
+Playwright comes with the e2e suite, but its browsers do not: install scripts
+are off (`.yarnrc.yml`), so `yarn install` never downloads one. Fetch it once:
 
 ```console
-npm i --prefix /tmp/pw playwright@1.56.1
-/tmp/pw/node_modules/.bin/playwright install chromium
+yarn playwright install chromium
 ```
-
-Do **not** run `npm install` inside the repository: npm rewrites `yarn.lock`
-in its own format.
 
 ```console
-BASE=http://localhost:4041 TENANT=team-a \
-  PLAYWRIGHT=/tmp/pw/node_modules/playwright/index.mjs \
-  node dev/screenshot.mjs
+BASE=http://localhost:4041 TENANT=team-a node dev/screenshot.mjs
 ```
+
+(`PLAYWRIGHT=` still points the script at an installation elsewhere, if you
+keep one.)
 
 Writes all four views in both themes to `dev/screenshots/` (git-ignored) and
 exits non-zero if any view failed to render or logged a page error. `FROM` /
@@ -84,10 +80,14 @@ generator run for about ten minutes:
 
 ```console
 BASE=http://localhost:4041 TENANT=team-a FROM=now-15m OUT=docs/screenshots \
-  PLAYWRIGHT=/tmp/pw/node_modules/playwright/index.mjs \
   node dev/screenshot.mjs
 rm docs/screenshots/*-light.png     # the README only embeds the dark ones
 ```
+
+## Recording e2e fixtures
+
+The e2e suite replays responses captured from this stack, so it is also what
+you bring up to refresh them — `e2e/README.md` has the procedure.
 
 ## Running Pyroscope outside Docker
 

@@ -1,0 +1,56 @@
+# End-to-end tests
+
+What the unit tests cannot reach: the binary serving its embedded UI, the
+proxy, the wire format decoding, and the canvases those end up on.
+
+```console
+yarn playwright install chromium   # once; not part of `yarn install`
+yarn test:e2e                      # builds the UI and the binary, then runs
+```
+
+## How it is wired
+
+```
+chromium ──▶ ./pyrolens :4141 ──▶ e2e/fake-pyroscope.mjs :4142 ──▶ fixtures/
+             (the real binary,       (replays captured
+              embedded UI)            responses)
+```
+
+Playwright starts both servers (`playwright.config.ts`). Nothing is stubbed
+inside the browser, so a request really does travel through the Go proxy —
+which is how the suite can assert that the tenant header arrived, by reading
+the fake upstream's request log back over `/__log`.
+
+**The fixtures decide the time range, not the clock.** `fixtures/meta.json`
+records the window the capture was taken with, and `helpers.ts` builds every
+URL from it. Pin a range by hand instead and the points land off their own
+axis, which looks like a rendering bug.
+
+## Refreshing the fixtures
+
+The fixtures are the bytes a real Pyroscope sent — that is the whole point,
+because it means a renamed wire field fails the suite rather than passing
+against something hand-written. Re-record them when the Pyroscope version
+moves:
+
+```console
+docker compose -f dev/compose.yaml up -d
+node e2e/capture.mjs                 # waits for profiles, then writes fixtures/
+docker compose -f dev/compose.yaml down -v
+```
+
+`capture.mjs` picks two adjacent minute-aligned windows, because the load
+generator adds a `slowRegression` frame every other minute — that is what
+gives Comparison and Diff a real difference to show. It also captures the
+refusal a multitenant server gives for an empty tenant, which is what the
+UI's tenancy probe reads.
+
+Review the diff before committing it: a fixture changing shape is a fact
+about the server worth noticing, not noise. They are excluded from prettier
+(`.prettierignore`) so the bytes stay as they arrived.
+
+## What is deliberately not here
+
+Screenshot comparison. Canvas output differs with the platform's font
+rendering, so baselines would have to be taken in one fixed container to mean
+anything. `dev/screenshot.mjs` covers the visual review by hand for now.
