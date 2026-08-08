@@ -1,8 +1,13 @@
 import uFuzzy from '@leeoniya/ufuzzy';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { fetchLabelNames, fetchLabelValues } from '@api/client';
 import { useDebouncedValue } from './useDebouncedValue';
-import { escapeValue, isInternalLabel } from '../queryLang';
+import {
+  escapeValue,
+  isInternalLabel,
+  toDisplayLabel,
+  toInternalLabel,
+} from '../queryLang';
 
 const uf = new uFuzzy();
 const MAX_SUGGESTIONS = 50;
@@ -147,12 +152,20 @@ export function useLabelSuggestions({
     setValues([]);
   }
 
+  // Both success paths re-check `aborted` before writing: a response that
+  // finished parsing before the abort still lands otherwise, and would stick
+  // (the pool reset above has already run, so nothing refetches after it).
   const wantNames = context?.kind === 'name' && names.length === 0;
   useEffect(() => {
     if (!wantNames) return;
     const controller = new AbortController();
     fetchLabelNames([], debStart, debEnd, controller.signal)
-      .then((ns) => setNames(ns.filter((n) => !isInternalLabel(n))))
+      .then((ns) => {
+        if (controller.signal.aborted) return;
+        // The server calls it `__profile_type__`; the query language shows
+        // `profile_type`, so it has to be offered under that name.
+        setNames(ns.map(toDisplayLabel).filter((n) => !isInternalLabel(n)));
+      })
       .catch(() => {});
     return () => controller.abort();
   }, [wantNames, debStart, debEnd, tenantID]);
@@ -160,19 +173,37 @@ export function useLabelSuggestions({
   useEffect(() => {
     if (!debLabel) return;
     const controller = new AbortController();
-    fetchLabelValues(debLabel, [], debStart, debEnd, controller.signal)
-      .then((vs) => setValues(vs))
+    // The pseudo-label is queried under its server-side name, or the values
+    // of `profile_type` come back empty.
+    fetchLabelValues(
+      toInternalLabel(debLabel),
+      [],
+      debStart,
+      debEnd,
+      controller.signal,
+    )
+      .then((vs) => {
+        if (!controller.signal.aborted) setValues(vs);
+      })
       .catch(() => {});
     return () => controller.abort();
   }, [debLabel, debStart, debEnd, tenantID]);
 
-  let pool: string[] = [];
-  if (context?.kind === 'name') {
-    pool = names;
-  } else if (context && context.labelName === debLabel) {
-    pool = values;
-  }
-  const suggestions = context ? fuzzyFilter(pool, context.prefix) : [];
+  // Memoized: the query bar re-renders on every caret move and every mouse
+  // move over the popup, and a fuzzy pass over a high-cardinality value pool
+  // is too expensive to repeat when neither the pool nor the needle moved.
+  const kind = context?.kind;
+  const contextLabel = context?.labelName;
+  const prefix = context?.prefix;
+  const pool = useMemo(() => {
+    if (kind === 'name') return names;
+    if (kind === 'value' && contextLabel === debLabel) return values;
+    return [];
+  }, [kind, contextLabel, debLabel, names, values]);
+  const suggestions = useMemo(
+    () => (prefix === undefined ? [] : fuzzyFilter(pool, prefix)),
+    [pool, prefix],
+  );
 
   return {
     context,

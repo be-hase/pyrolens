@@ -16,7 +16,6 @@ import {
   fetchLabelValues,
   fetchServices,
   fetchTimeline,
-  getTenant,
   profileTypeLabel,
   profileTypeUnit,
   setTenant,
@@ -146,7 +145,6 @@ describe('rpc transport', () => {
 
   it('sends the tenant header once one is set', async () => {
     setTenant('team-a');
-    assert.equal(getTenant(), 'team-a');
     reply = () => json({ names: [] });
     await fetchLabelNames(['{}'], 1, 2);
     assert.equal(only().headers.get('X-Scope-OrgID'), 'team-a');
@@ -155,7 +153,6 @@ describe('rpc transport', () => {
   it('treats an empty tenant as unset', async () => {
     setTenant('team-a');
     setTenant('');
-    assert.equal(getTenant(), undefined);
     reply = () => json({ names: [] });
     await fetchLabelNames(['{}'], 1, 2);
     assert.equal(only().headers.has('X-Scope-OrgID'), false);
@@ -519,7 +516,9 @@ describe('fetchGroupedTimelines', () => {
     );
   });
 
-  it('truncates to the limit, keeping the largest groups', async () => {
+  it('returns every group, largest total first', async () => {
+    // No truncation here: the Tag Explorer computes each group's share of
+    // the total from this list, so dropping groups would inflate the shares.
     reply = () =>
       json({
         series: [
@@ -532,28 +531,11 @@ describe('fetchGroupedTimelines', () => {
       ...QUERY,
       step: 15,
       groupBy: 'region',
-      limit: 2,
     });
     assert.deepEqual(
       grouped.map((g) => g.labelValue),
-      ['b', 'c'],
+      ['b', 'c', 'a'],
     );
-  });
-
-  it('returns everything when no limit is given', async () => {
-    reply = () =>
-      json({
-        series: [
-          series({ region: 'a' }, [[1000, 1]]),
-          series({ region: 'b' }, [[1000, 9]]),
-        ],
-      });
-    const grouped = await fetchGroupedTimelines({
-      ...QUERY,
-      step: 15,
-      groupBy: 'region',
-    });
-    assert.equal(grouped.length, 2);
   });
 });
 

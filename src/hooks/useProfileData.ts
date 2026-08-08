@@ -1,16 +1,18 @@
-import { useEffect, useState } from 'react';
 import {
+  fetchDiffFlamegraph,
   fetchFlamegraph,
   fetchTimeline,
+  type DiffFlamegraphData,
   type FlamegraphData,
   type Point,
 } from '@api/client';
 import { isMalformedQuery, splitQuery } from '../queryLang';
 import { timelineStep, type TimeRange } from '../time';
+import { useFetched } from './useFetched';
 
 const EMPTY: FlamegraphData = { names: [], levels: [] };
 
-const MALFORMED_MESSAGE =
+export const MALFORMED_MESSAGE =
   'Could not parse the query. Expected a selector like ' +
   '{service_name="my-service", profile_type="..."}.';
 
@@ -32,48 +34,30 @@ export function useFlamegraph({
   loading: boolean;
   error: string | null;
 } {
-  const [flamegraph, setFlamegraph] = useState<FlamegraphData>(EMPTY);
-  const [fetching, setFetching] = useState(false);
-  const [fetchError, setFetchError] = useState<string | null>(null);
-
   const { profileTypeID, labelSelector } = splitQuery(query);
-  const malformed = isMalformedQuery(query);
   const { start, end } = range;
 
   // Derived, not stored: when there is nothing to fetch the spinner and any
   // previous error disappear without an effect having to reset them (an
   // aborted request never reaches its own cleanup).
   const active = enabled && !!profileTypeID;
-  const loading = active && fetching;
-  const error = malformed ? MALFORMED_MESSAGE : active ? fetchError : null;
+  const { data, fetching, fetchError } = useFetched(
+    EMPTY,
+    active,
+    (signal) =>
+      fetchFlamegraph({ profileTypeID, labelSelector, start, end }, signal),
+    [profileTypeID, labelSelector, start, end, tenantID],
+  );
 
-  useEffect(() => {
-    if (!active) return;
-    const controller = new AbortController();
-
-    async function load() {
-      setFetching(true);
-      setFetchError(null);
-      try {
-        const fg = await fetchFlamegraph(
-          { profileTypeID, labelSelector, start, end },
-          controller.signal,
-        );
-        if (controller.signal.aborted) return;
-        setFlamegraph(fg);
-      } catch (e: unknown) {
-        if (controller.signal.aborted) return;
-        setFetchError(e instanceof Error ? e.message : String(e));
-      } finally {
-        if (!controller.signal.aborted) setFetching(false);
-      }
-    }
-    load();
-
-    return () => controller.abort();
-  }, [active, profileTypeID, labelSelector, start, end, tenantID]);
-
-  return { flamegraph, loading, error };
+  return {
+    flamegraph: data,
+    loading: active && fetching,
+    error: isMalformedQuery(query)
+      ? MALFORMED_MESSAGE
+      : active
+        ? fetchError
+        : null,
+  };
 }
 
 export function useTimeline({
@@ -82,52 +66,99 @@ export function useTimeline({
   tenantID,
   enabled = true,
 }: FetchOpts): { timeline: Point[]; loading: boolean; error: string | null } {
-  const [timeline, setTimeline] = useState<Point[]>([]);
-  const [fetching, setFetching] = useState(false);
-  const [fetchError, setFetchError] = useState<string | null>(null);
-
   const { profileTypeID, labelSelector } = splitQuery(query);
-  const malformed = isMalformedQuery(query);
   const { start, end } = range;
 
-  // Derived, not stored: when there is nothing to fetch the spinner and any
-  // previous error disappear without an effect having to reset them (an
-  // aborted request never reaches its own cleanup).
   const active = enabled && !!profileTypeID;
-  const loading = active && fetching;
-  const error = malformed ? MALFORMED_MESSAGE : active ? fetchError : null;
+  const { data, fetching, fetchError } = useFetched(
+    [] as Point[],
+    active,
+    (signal) =>
+      fetchTimeline(
+        {
+          profileTypeID,
+          labelSelector,
+          start,
+          end,
+          step: timelineStep({ start, end }),
+        },
+        signal,
+      ),
+    [profileTypeID, labelSelector, start, end, tenantID],
+  );
 
-  useEffect(() => {
-    if (!active) return;
-    const controller = new AbortController();
+  return {
+    timeline: data,
+    loading: active && fetching,
+    error: isMalformedQuery(query)
+      ? MALFORMED_MESSAGE
+      : active
+        ? fetchError
+        : null,
+  };
+}
 
-    async function load() {
-      setFetching(true);
-      setFetchError(null);
-      try {
-        const tl = await fetchTimeline(
-          {
-            profileTypeID,
-            labelSelector,
-            start,
-            end,
-            step: timelineStep({ start, end }),
-          },
-          controller.signal,
-        );
-        if (controller.signal.aborted) return;
-        setTimeline(tl);
-      } catch (e: unknown) {
-        if (controller.signal.aborted) return;
-        setFetchError(e instanceof Error ? e.message : String(e));
-      } finally {
-        if (!controller.signal.aborted) setFetching(false);
-      }
-    }
-    load();
+export function useDiffFlamegraph({
+  leftQuery,
+  rightQuery,
+  leftRange,
+  rightRange,
+  tenantID,
+}: {
+  leftQuery: string;
+  rightQuery: string;
+  leftRange: TimeRange;
+  rightRange: TimeRange;
+  tenantID?: string;
+}): {
+  diff: DiffFlamegraphData | null;
+  loading: boolean;
+  error: string | null;
+} {
+  const left = splitQuery(leftQuery);
+  const right = splitQuery(rightQuery);
 
-    return () => controller.abort();
-  }, [active, profileTypeID, labelSelector, start, end, tenantID]);
+  const active = !!left.profileTypeID && !!right.profileTypeID;
+  const { data, fetching, fetchError } = useFetched<DiffFlamegraphData | null>(
+    null,
+    active,
+    (signal) =>
+      fetchDiffFlamegraph(
+        {
+          profileTypeID: left.profileTypeID,
+          labelSelector: left.labelSelector,
+          start: leftRange.start,
+          end: leftRange.end,
+        },
+        {
+          profileTypeID: right.profileTypeID,
+          labelSelector: right.labelSelector,
+          start: rightRange.start,
+          end: rightRange.end,
+        },
+        signal,
+      ),
+    [
+      left.profileTypeID,
+      left.labelSelector,
+      right.profileTypeID,
+      right.labelSelector,
+      leftRange.start,
+      leftRange.end,
+      rightRange.start,
+      rightRange.end,
+      tenantID,
+    ],
+  );
 
-  return { timeline, loading, error };
+  return {
+    diff: data,
+    loading: active && fetching,
+    error:
+      isMalformedQuery(leftQuery) || isMalformedQuery(rightQuery)
+        ? MALFORMED_MESSAGE
+        : active
+          ? fetchError
+          : null,
+  };
 }

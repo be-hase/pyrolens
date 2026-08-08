@@ -2,7 +2,7 @@ import { Fragment, useState } from 'react';
 import { Button } from '@components/core/Button';
 import { Dropdown } from '@components/core/Dropdown';
 import { Icon } from '@components/core/Icon';
-import { formatRangeLabel, isRelative, resolveRange } from '../time';
+import { formatRangeLabel, isRelative, type TimeRange } from '../time';
 import { navigate } from '../urlState';
 import './TimeRangePicker.css';
 
@@ -97,10 +97,14 @@ const MONTHS = [
 ];
 const WEEKDAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
-/** Local "YYYY-MM-DD" for a Date. */
+/**
+ * Local "YYYY-MM-DD" for a Date. Defined via `toLocalInput` because the
+ * calendar compares these keys against the date part of the input field —
+ * two independent formatters would let the two drift and silently break the
+ * selected/today highlighting.
+ */
 function toDateKey(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return toLocalInput(d.getTime()).slice(0, 10);
 }
 
 // Custom month-grid calendar, so the picker looks the same in every browser
@@ -273,16 +277,22 @@ function DateTimeField({
 export function TimeRangePicker({
   from,
   until,
+  range,
 }: {
   from: string;
   until: string;
+  /** `from`/`until` as App resolved them, so the label and the drafted
+   * absolute bounds agree with what the charts actually fetched. */
+  range: TimeRange;
 }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState({ from: '', until: '' });
 
   const openPicker = () => {
-    const { start, end } = resolveRange(from, until, Date.now());
-    setDraft({ from: toLocalInput(start), until: toLocalInput(end) });
+    setDraft({
+      from: toLocalInput(range.start),
+      until: toLocalInput(range.end),
+    });
     setOpen(true);
   };
 
@@ -316,7 +326,7 @@ export function TimeRangePicker({
         aria-expanded={open}
         onClick={() => (open ? setOpen(false) : openPicker())}
       >
-        {formatRangeLabel(from, until)}
+        {formatRangeLabel(from, until, range)}
       </Button>
       <Dropdown open={open} onClose={() => setOpen(false)} className="trp">
         <div className="trp-absolute">

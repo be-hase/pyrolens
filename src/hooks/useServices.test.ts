@@ -26,7 +26,11 @@ describe('useServices', () => {
     assert.equal(result.current.servicesLoading, true);
     await waitFor(() => assert.equal(result.current.servicesLoading, false));
     assert.deepEqual(result.current.services, [WEB]);
-    assert.deepEqual(servicesOf.mock.calls[0], [RANGE.start, RANGE.end]);
+    const [start, end, signal] = servicesOf.mock.calls[0];
+    assert.deepEqual([start, end], [RANGE.start, RANGE.end]);
+    // The signal is what lets a superseded Series request actually be
+    // cancelled instead of queueing behind the browser's connection cap.
+    assert.ok(signal instanceof AbortSignal);
   });
 
   // Rejections are always queued with a *Once variant: replacing a mock's
@@ -41,7 +45,10 @@ describe('useServices', () => {
     assert.equal(result.current.servicesLoading, false);
   });
 
-  it('clears a previous error once a load succeeds', async () => {
+  it('clears a previous error as soon as a retry starts', async () => {
+    // The error goes away when the new fetch begins, not only when it
+    // succeeds — a stale failure banner must not outlive the request that
+    // replaced it.
     servicesOf.mockRejectedValueOnce(new Error('down'));
     servicesOf.mockResolvedValueOnce([WEB]);
     const { result, rerender } = renderHook(
@@ -51,7 +58,7 @@ describe('useServices', () => {
     await waitFor(() => assert.equal(result.current.error, 'down'));
     rerender({ tenantID: 'team-b' });
     await waitFor(() => assert.equal(result.current.error, null));
-    assert.deepEqual(result.current.services, [WEB]);
+    await waitFor(() => assert.deepEqual(result.current.services, [WEB]));
   });
 
   it('does not fetch while disabled', () => {

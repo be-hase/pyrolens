@@ -2,11 +2,19 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'vitest';
 import { TimeRangePicker } from './TimeRangePicker.tsx';
+import { resolveRange } from '../time';
 
 const at = (search: string) => window.history.replaceState(null, '', search);
 
+// The component takes the range App resolved; the tests resolve it the same
+// way so the label and the drafted bounds match the from/until they pass.
+const rangeOf = (from: string, until: string) =>
+  resolveRange(from, until, Date.now());
+
 const open = (from = 'now-1h', until = 'now') => {
-  render(<TimeRangePicker from={from} until={until} />);
+  render(
+    <TimeRangePicker from={from} until={until} range={rangeOf(from, until)} />,
+  );
   const trigger = screen.getByRole('button', { name: /Last|:/ });
   fireEvent.click(trigger);
   return trigger;
@@ -23,7 +31,13 @@ beforeEach(() => at('/'));
 
 describe('TimeRangePicker', () => {
   it('labels the trigger with the current range', () => {
-    render(<TimeRangePicker from="now-6h" until="now" />);
+    render(
+      <TimeRangePicker
+        from="now-6h"
+        until="now"
+        range={rangeOf('now-6h', 'now')}
+      />,
+    );
     assert.ok(screen.getByRole('button', { name: /Last 6h/ }));
   });
 

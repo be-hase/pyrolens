@@ -62,9 +62,17 @@ describe('resolveTime', () => {
   });
 
   it('promotes second timestamps to milliseconds', () => {
-    // The classic UI wrote unix seconds; anything below ~2001 in ms is one.
+    // The classic UI wrote unix seconds; a value still before ~2100 read as
+    // seconds is one.
     assert.equal(resolveTime('1786000000', 0, NOW), 1_786_000_000_000);
-    assert.equal(resolveTime('999999999999', 0, NOW), 999_999_999_999_000);
+    assert.equal(resolveTime('4102444799', 0, NOW), 4_102_444_799_000);
+  });
+
+  it('keeps pre-2001 millisecond timestamps as milliseconds', () => {
+    // The range picker writes ms; reading 1999 as seconds would fling the
+    // range ~29000 years into the future.
+    const y1999 = new Date(1999, 0, 1).getTime();
+    assert.equal(resolveTime(String(y1999), 0, NOW), y1999);
     assert.equal(resolveTime('1000000000000', 0, NOW), 1_000_000_000_000);
   });
 
@@ -126,29 +134,51 @@ describe('resolveRange', () => {
 });
 
 describe('formatRangeLabel', () => {
+  const range = (from: string | null, until: string | null) =>
+    resolveRange(from, until, NOW);
+
   it('labels a relative range by its span', () => {
-    assert.equal(formatRangeLabel('now-30m', 'now'), 'Last 30m');
-    assert.equal(formatRangeLabel('now-7d', null), 'Last 7d');
-    assert.equal(formatRangeLabel('now-1w', undefined), 'Last 1w');
+    assert.equal(
+      formatRangeLabel('now-30m', 'now', range('now-30m', 'now')),
+      'Last 30m',
+    );
+    assert.equal(
+      formatRangeLabel('now-7d', null, range('now-7d', null)),
+      'Last 7d',
+    );
+    assert.equal(
+      formatRangeLabel('now-1w', undefined, range('now-1w', null)),
+      'Last 1w',
+    );
   });
 
   it('labels an unset range as the default hour', () => {
-    assert.equal(formatRangeLabel(null, null), 'Last 1h');
-    assert.equal(formatRangeLabel('now', 'now'), 'Last 1h');
+    assert.equal(formatRangeLabel(null, null, range(null, null)), 'Last 1h');
+    assert.equal(
+      formatRangeLabel('now', 'now', range('now', 'now')),
+      'Last 1h',
+    );
   });
 
   it('spells out an absolute range in fixed English', () => {
     const start = new Date(2026, 0, 2, 9, 5, 0).getTime();
     const end = new Date(2026, 0, 2, 17, 30, 0).getTime();
     assert.equal(
-      formatRangeLabel(String(start), String(end)),
+      formatRangeLabel(String(start), String(end), { start, end }),
       'Jan 2 09:05 – Jan 2 17:30',
     );
   });
 
-  it('spells out a range whose end is pinned but start is relative', () => {
+  it('formats the range it was handed, never re-resolving "now" itself', () => {
+    // The caller resolved the range once at navigation time; the label must
+    // describe that window, not one recomputed at render time.
     const end = new Date(2026, 7, 7, 8, 0, 0).getTime();
-    assert.ok(formatRangeLabel('now-1h', String(end)).endsWith('Aug 7 08:00'));
+    const start = end - 3_600_000;
+    assert.ok(
+      formatRangeLabel('now-1h', String(end), { start, end }).endsWith(
+        'Aug 7 08:00',
+      ),
+    );
   });
 });
 

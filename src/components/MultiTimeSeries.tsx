@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Empty } from '@components/core/Empty';
 import { profileTypeUnit } from '@api/client';
 import {
@@ -24,6 +24,14 @@ export interface NamedSeries {
   points: { value: number; timestamp: number }[];
 }
 
+const W = 800;
+const H = 140;
+const BOX: PlotBox = {
+  height: H,
+  padTop: PLOT_PAD_TOP,
+  padBottom: PLOT_PAD_BOTTOM,
+};
+
 // One line per label value (Tag Explorer breakdown). Series identity is
 // color + the legend below; the companion table repeats every value, so
 // low-contrast light-mode hues stay readable ("relief" rule).
@@ -38,16 +46,8 @@ export function MultiTimeSeries({
   startMs: number;
   endMs: number;
 }) {
-  const W = 800;
-  const H = 140;
-  const BOX: PlotBox = {
-    height: H,
-    padTop: PLOT_PAD_TOP,
-    padBottom: PLOT_PAD_BOTTOM,
-  };
   const durationMs = endMs - startMs;
 
-  const svgRef = useRef<SVGSVGElement>(null);
   const [hoverFrac, setHoverFrac] = useState<number | null>(null);
 
   const max = useMemo(
@@ -55,24 +55,32 @@ export function MultiTimeSeries({
     [series],
   );
 
-  if (series.length === 0 || durationMs <= 0) return <Empty />;
-
   const unit = profileTypeUnit(profileTypeId);
   // One shared scale for lines AND axis labels, in display units, so a peak
   // drawn at a gridline reads as that gridline's value.
   const displayMax = niceMax(toDisplayValue(max, unit));
   const x = (ts: number) => timeToX(ts, startMs, durationMs, W);
-  const y = (v: number) => valueToY(toDisplayValue(v, unit), displayMax, BOX);
 
-  const paths = series.map((s) =>
-    s.points.length
-      ? `M ${x(s.points[0].timestamp).toFixed(1)},${y(s.points[0].value).toFixed(1)} ` +
-        s.points
-          .slice(1)
-          .map((p) => `L ${x(p.timestamp).toFixed(1)},${y(p.value).toFixed(1)}`)
-          .join(' ')
-      : '',
+  // Memoized: hover state changes on every mouse move, and the geometry
+  // cannot change with it.
+  const paths = useMemo(
+    () =>
+      series.map((s) =>
+        s.points.length
+          ? `M ${timeToX(s.points[0].timestamp, startMs, durationMs, W).toFixed(1)},${valueToY(toDisplayValue(s.points[0].value, unit), displayMax, BOX).toFixed(1)} ` +
+            s.points
+              .slice(1)
+              .map(
+                (p) =>
+                  `L ${timeToX(p.timestamp, startMs, durationMs, W).toFixed(1)},${valueToY(toDisplayValue(p.value, unit), displayMax, BOX).toFixed(1)}`,
+              )
+              .join(' ')
+          : '',
+      ),
+    [series, startMs, durationMs, unit, displayMax],
   );
+
+  if (series.length === 0 || durationMs <= 0) return <Empty />;
 
   const stepMs = tickStepMs(durationMs);
   const ticks: { x: number; label: string }[] = [];
@@ -130,7 +138,6 @@ export function MultiTimeSeries({
         </div>
         <div className="timeseries-chart">
           <svg
-            ref={svgRef}
             viewBox={`0 0 ${W} ${H}`}
             preserveAspectRatio="none"
             width="100%"
