@@ -5,9 +5,14 @@ interface Props {
   fallback?: ReactNode;
   /**
    * A change here is a new attempt: the fallback is dropped and the subtree
-   * renders again. Without it the first bad profile latches the fallback for
-   * as long as the view is mounted — including the query bar and time range
-   * picker the fallback tells the user to change, which live inside it.
+   * renders again. Without it the first bad profile latched the fallback for
+   * as long as the view stayed mounted.
+   *
+   * Note what this can and cannot reach. The controls that write URL params
+   * are rendered *inside* the boundary, so they are gone the moment the
+   * fallback replaces the subtree — the recovery path is Back/Forward (which
+   * moves the params from outside the tree) or another view, not editing the
+   * query. The fallback text says so.
    */
   resetKey?: string;
 }
@@ -40,8 +45,8 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         this.props.fallback ?? (
           <div className="app-error">
-            Something went wrong rendering this view. Try a different query or
-            time range.
+            Something went wrong rendering this view. Go back to the previous
+            query, pick another view, or reload the page.
           </div>
         )
       );

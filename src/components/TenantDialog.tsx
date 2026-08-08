@@ -38,7 +38,17 @@ export function TenantDialog({
     // blur the input and drop focus to <body>; from there Tab walks into the
     // NavBar behind the overlay, where every control queries without a
     // tenant. Preventing the default keeps focus where the trap can see it.
-    <div className="tenant-backdrop" onMouseDown={(e) => e.preventDefault()}>
+    //
+    // Only for the backdrop itself: React bubbles mousedown, so cancelling it
+    // for the whole subtree also cancels the default action of focusing the
+    // control that was clicked — the field could not be clicked into, and its
+    // text could not be selected.
+    <div
+      className="tenant-backdrop"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) e.preventDefault();
+      }}
+    >
       <div
         ref={dialogRef}
         className="tenant-dialog"

@@ -324,10 +324,18 @@ describe('axisTicks', () => {
     const tz = process.env.TZ;
     process.env.TZ = 'America/New_York';
     try {
-      // Nov 1 2026 is the fall-back; Mar 8 2026 the spring-forward.
+      // Nov 1 2026 is the fall-back; Mar 8 2026 the spring-forward. The
+      // half-past starts matter: from a start already on a local midnight the
+      // first tick needs no snapping, which is exactly the case that hid a
+      // missing gridline the day after a transition.
       for (const [label, from] of [
         ['fall back', new Date(2026, 9, 29).getTime()],
         ['spring forward', new Date(2026, 2, 4).getTime()],
+        ['fall back, mid-day start', new Date(2026, 9, 31, 12, 30).getTime()],
+        [
+          'spring forward, mid-day start',
+          new Date(2026, 2, 7, 12, 30).getTime(),
+        ],
       ] as const) {
         const ticks = axisTicks(from, 7 * 86_400_000, 86_400_000);
         assert.ok(ticks.length > 0, label);
