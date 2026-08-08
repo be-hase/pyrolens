@@ -46,7 +46,7 @@ or `--clean` deletes the UI mid-release. `.goreleaser.yaml` points it at
 ```console
 yarn install --immutable
 yarn dev            # vite on :5173; PYROSCOPE_URL=... to point it elsewhere
-yarn type-check     # tsc -b
+yarn type-check     # tsc -b --noEmit
 yarn lint           # eslint
 yarn format         # prettier --check   (format:fix to write)
 yarn test           # vitest: units, hooks and components (jsdom)
@@ -56,7 +56,7 @@ yarn build          # -> dist/
 
 go test ./...       # server tests (needs dist/, see above)
 
-make build          # yarn build + go build -o pyrolens
+make build          # yarn install + yarn build + go build -o pyrolens
 make run            # build, then serve on :4041
 make docker         # local image
 make snapshot       # exercise the release pipeline without publishing

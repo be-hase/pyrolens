@@ -1,6 +1,24 @@
+# The Dockerfile COPYs an explicit allowlist, so nothing listed here could
+# reach the image anyway — this keeps the build *context* small, so a local
+# build artefact does not invalidate the daemon's cache on every run.
+.git
 node_modules
 dist
 pyrolens
-.git
 *.log
 .idea
+
+# Build and test output
+coverage
+test-results
+playwright-report
+.goreleaser-dist
+
+# Not read by any build stage
+docs
+e2e
+dev
+.github
+*.md
+LICENSE
+main_test.go

@@ -16,7 +16,9 @@ chromium ──▶ ./pyrolens :4141 ──▶ e2e/fake-pyroscope.mjs :4142 ─�
               embedded UI)            responses)
 ```
 
-Playwright starts both servers (`playwright.config.ts`). Nothing is stubbed
+Playwright starts **four** processes (`playwright.config.ts`): that pair, plus
+a second one on :4143/:4144 whose fake answers the tenancy probe instead of
+refusing it, which is what `single-tenant.spec.ts` runs against. Nothing is stubbed
 inside the browser, so a request really does travel through the Go proxy —
 which is how the suite can assert that the tenant header arrived, by reading
 the fake upstream's request log back over `/__log`.
