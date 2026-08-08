@@ -111,6 +111,12 @@ fine in a quick test.
 - A control changes the screen by calling `navigate()`. The only local state
   is an edit buffer — the query bar, the range-picker draft — that resets
   when its URL value changes.
+- **Transient UI state next to an edit buffer resets with it.** The query
+  bar's caret offset and open typeahead are anchored to `committedQuery`, the
+  URL value, not to the draft (which changes on every keystroke). Left
+  unanchored they survived the URL moving underneath — App writing the
+  default query in mid-typing — and the popup then spliced a suggestion into
+  the new text at an offset that meant something else entirely.
 - **"Now" advances on every navigation, including one that changes nothing.**
   That is what makes Run a real refresh for a relative range. It is a cached
   snapshot read through `useSyncExternalStore`, so renders stay pure; do not
@@ -122,14 +128,25 @@ fine in a quick test.
 
 ### Fetching
 
+- **Every data hook goes through `src/hooks/useFetched.ts`.** The
+  abort/loading/error protocol had six hand-written copies once and they
+  drifted: one never aborted, one never cleared a stale error, one left the
+  spinner stuck when disabled. Add a fetch by calling `useFetched`, not by
+  pasting the shape again.
 - **Derive `loading` and `error`; never reset them from an effect body.**
   When there is nothing to fetch the derived values disappear on their own.
   The effect-reset version left the spinner running forever whenever the next
   query was unparseable, and the lint rule rejects it besides.
+- **A fetch that is due but has not started still counts as loading.**
+  Effects run after the commit, so between a deps change and the fetch
+  starting there is a render holding the previous data with nothing in
+  flight; reporting "not loading" there paints an empty result as though it
+  were the answer. `useFetched` compares the key a fetch was started for
+  against the current one.
 - **Every fetch takes an `AbortSignal`, and every path after an `await`
   re-checks `signal.aborted` before touching state** — success paths
   included, or rapid navigation writes a superseded response over the current
-  one.
+  one. `abort()` does nothing to a response that has already been parsed.
 
 ### Building a query
 
@@ -147,6 +164,12 @@ fine in a quick test.
 - **Flamebearer decoding is iterative on purpose.** A recursive walk
   overflows the stack somewhere under 7000 frames and takes the whole app
   down; keep the explicit stack in `flamebearer.ts`.
+- **Axis ticks snap to local wall-clock boundaries, re-reading the zone
+  offset at every tick.** The labels are rendered with local getters, so an
+  epoch-aligned day tick claims a midnight it does not sit on — nine hours
+  off in UTC+9. Extrapolating one offset across the range is the same bug
+  reduced to an hour: across a DST transition it draws two gridlines with the
+  same date and none for the next day.
 - **Charts scale their marks with the same value the axis labels use.**
   Reading a peak against a gridline has to give the number on that gridline —
   scaling by the raw max while labelling with a rounded one was off by up
@@ -160,6 +183,14 @@ fine in a quick test.
 - The proxy's error detail goes to the log, not to the browser.
 - Requests are forwarded with the upstream's `Host`, so name-based routing
   (an ingress, Grafana Cloud) reaches the right backend.
+- **A missing file 404s; only view routes fall back to the SPA shell.**
+  Anything under `assets/`, and anything whose last path segment contains a
+  dot, is a file request. Falling back there hands the browser HTML with a
+  script's content type, which reads as a bad deploy rather than a stale
+  cache — and makes a mistyped icon path render as garbage instead of
+  failing.
+- The binary is PID 1 in the container, so it drains on SIGTERM rather than
+  dropping in-flight queries mid-response.
 
 ## Verifying a change
 
@@ -167,6 +198,15 @@ fine in a quick test.
 rendering, a canvas left blank, a control that no longer writes to the URL, a
 renamed wire field — because it drives the real binary against bytes a real
 Pyroscope sent. Run it for anything beyond a pure function.
+
+Two things about that suite are deliberate. **The browser runs as `ja-JP`**
+(`playwright.config.ts`), so a `toLocale*` creeping back in fails there
+instead of shipping Japanese month names to everyone but the CI runner. And
+**an assertion has to be able to fail**: the fake replays the same fixture
+whatever it is sent, so check what was actually requested through
+`upstreamLog` rather than only that the screen looks right. Several tests
+here once passed against a view that rendered nothing, because the string
+they waited for was a permanent NavBar label.
 
 It does not replace looking at the thing. It cannot tell you a chart is
 mis-scaled, a colour is unreadable, or a layout broke, and its fixtures are a

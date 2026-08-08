@@ -77,6 +77,17 @@ function scaledUnits(factor: number, units: string[]): ValueFormatter {
       scaled /= factor;
       step++;
     }
+    // The step is picked from the unrounded magnitude, but the mantissa is
+    // rounded — so the top sliver of a step renders as a number the unit
+    // beside it cannot hold (1048575 bytes as "1024 KiB"). Take the next step
+    // when rounding pushes it over.
+    if (
+      step < units.length - 1 &&
+      Math.abs(Number(toFixed(scaled, decimals))) >= factor
+    ) {
+      scaled /= factor;
+      step++;
+    }
 
     return {
       text: toFixed(scaled, decimals),
@@ -94,6 +105,17 @@ const MINUTE = 60 * SECOND;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
+/** The duration ladder, smallest first; the steps are not a fixed ratio. */
+const NS_STEPS: [divisor: number, suffix: string][] = [
+  [NS, ' ns'],
+  [US, ' µs'],
+  [MS, ' ms'],
+  [SECOND, ' s'],
+  [MINUTE, ' min'],
+  [HOUR, ' hour'],
+  [DAY, ' day'],
+];
+
 /** Nanoseconds to a human duration: ns / µs / ms / s / min / hour / day. */
 const nanoseconds: ValueFormatter = (value, decimals) => {
   const bail = invalid(value);
@@ -102,31 +124,24 @@ const nanoseconds: ValueFormatter = (value, decimals) => {
   }
 
   const abs = Math.abs(value);
-  const scale = (divisor: number, suffix: string): DisplayValue => ({
-    text: toFixed(value / divisor, decimals),
-    numeric: value,
-    suffix,
-  });
+  let step = 0;
+  while (step < NS_STEPS.length - 1 && abs >= NS_STEPS[step + 1][0]) {
+    step++;
+  }
+  // Same rounding trap as scaledUnits: 999999ns is under a millisecond, but
+  // rounds to "1000 µs" — a duration the next unit up should be showing.
+  // Without this the top table puts "60 s" and "1 min" on adjacent rows for
+  // values a nanosecond apart.
+  if (
+    step < NS_STEPS.length - 1 &&
+    Math.abs(Number(toFixed(value / NS_STEPS[step][0], decimals))) >=
+      NS_STEPS[step + 1][0] / NS_STEPS[step][0]
+  ) {
+    step++;
+  }
 
-  if (abs < US) {
-    return scale(NS, ' ns');
-  }
-  if (abs < MS) {
-    return scale(US, ' µs');
-  }
-  if (abs < SECOND) {
-    return scale(MS, ' ms');
-  }
-  if (abs < MINUTE) {
-    return scale(SECOND, ' s');
-  }
-  if (abs < HOUR) {
-    return scale(MINUTE, ' min');
-  }
-  if (abs < DAY) {
-    return scale(HOUR, ' hour');
-  }
-  return scale(DAY, ' day');
+  const [divisor, suffix] = NS_STEPS[step];
+  return { text: toFixed(value / divisor, decimals), numeric: value, suffix };
 };
 
 /** 1000-based SI, using Grafana's wording so `7.58 Tri` still reads the same. */
