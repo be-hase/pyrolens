@@ -193,6 +193,76 @@ func TestProxiesQueryPaths(t *testing.T) {
 	}
 }
 
+func TestSecurityHeaders(t *testing.T) {
+	h, _ := newTestHandler()
+	// Every response, not just the shell: the proxy puts upstream-controlled
+	// bytes on this origin, which is what the CSP is there to contain.
+	for _, path := range []string{"/", "/healthz", "/favicon.svg"} {
+		rec := get(t, h, path)
+		if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("%s: nosniff got %q", path, got)
+		}
+		csp := rec.Header().Get("Content-Security-Policy")
+		for _, want := range []string{"default-src 'self'", "frame-ancestors 'none'"} {
+			if !strings.Contains(csp, want) {
+				t.Errorf("%s: csp %q is missing %q", path, csp, want)
+			}
+		}
+	}
+}
+
+func TestEncodedTraversalIsNotProxied(t *testing.T) {
+	// ServeMux cleans the escaped path, so a literal "/pyroscope/../admin" is
+	// redirected before the handler sees it — but "%2e%2e%2f" survives and
+	// decodes into r.URL.Path, passing a plain prefix check. The proxy would
+	// then forward the original encoding, and any upstream that normalises
+	// paths would serve whatever it pointed at, allowlist bypassed.
+	traversals := []string{
+		"/pyroscope/%2e%2e%2fadmin",
+		"/pyroscope/%2e%2e%2f",
+		"/querier.v1.QuerierService/%2e%2e%2f%2e%2e%2fingest",
+	}
+	for _, target := range traversals {
+		h, proxy := newTestHandler()
+		rec := get(t, h, target)
+		if proxy.called {
+			t.Errorf("%s: reached the proxy", target)
+		}
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status got %d, want 400", target, rec.Code)
+		}
+	}
+
+	// The unencoded forms never reach the handler: ServeMux cleans the
+	// escaped path and redirects first. Asserted so a future router change
+	// that stops doing that is caught here rather than in production.
+	for _, target := range []string{"/pyroscope/../admin", "/pyroscope//render"} {
+		h, proxy := newTestHandler()
+		rec := get(t, h, target)
+		if proxy.called {
+			t.Errorf("%s: reached the proxy", target)
+		}
+		// Which 3xx is ServeMux's business; that it redirects rather than
+		// forwarding is ours.
+		if rec.Code < 300 || rec.Code >= 400 {
+			t.Errorf("%s: status got %d, want a redirect", target, rec.Code)
+		}
+	}
+
+	// The legitimate shapes must still go through, trailing slash included.
+	for _, target := range []string{
+		"/pyroscope/",
+		"/pyroscope/render",
+		"/querier.v1.QuerierService/SelectMergeStacktraces",
+	} {
+		h, proxy := newTestHandler()
+		get(t, h, target)
+		if !proxy.called {
+			t.Errorf("%s: was not proxied", target)
+		}
+	}
+}
+
 func TestProxyForwardsToUpstreamWithItsOwnHost(t *testing.T) {
 	var gotHost, gotPath, gotQuery string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

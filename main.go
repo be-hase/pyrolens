@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path"
 	"strings"
 	"syscall"
 	"time"
@@ -32,6 +33,31 @@ var version = "dev"
 var proxyPrefixes = []string{
 	"/querier.v1.QuerierService/",
 	"/pyroscope/",
+}
+
+// How long a termination signal waits for in-flight queries. Long enough for
+// a normal merge to finish, short enough to stay inside a container runtime's
+// default grace period — a profile query that outlives it is still cut off,
+// which is why the timeouts above it are not the drain budget.
+const shutdownGrace = 25 * time.Second
+
+// Sent on every response. The proxy renders bytes from the Pyroscope server
+// on this origin, so a CSP here is what stops upstream-controlled HTML from
+// running with the UI's origin, and nosniff removes the MIME-confusion path
+// around the embedded assets. The SPA needs no inline script; React's style
+// props are applied through CSSOM, not style attributes, and every request it
+// makes is same-origin.
+const contentSecurityPolicy = "default-src 'self'; img-src 'self' data:; " +
+	"style-src 'self' 'unsafe-inline'; connect-src 'self'; " +
+	"frame-ancestors 'none'; base-uri 'none'; object-src 'none'"
+
+func withSecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		next.ServeHTTP(w, r)
+	})
 }
 
 func envOr(key, fallback string) string {
@@ -68,6 +94,16 @@ func newProxy(target *url.URL) *httputil.ReverseProxy {
 	return proxy
 }
 
+// isCanonicalPath reports whether p is already in cleaned form. A trailing
+// slash is allowed, since path.Clean strips one and "/pyroscope/" needs it.
+func isCanonicalPath(p string) bool {
+	clean := path.Clean(p)
+	if clean != "/" && strings.HasSuffix(p, "/") {
+		clean += "/"
+	}
+	return clean == p
+}
+
 // newHandler routes the query API to Pyroscope and everything else to the
 // embedded UI, whose shell is `index`.
 func newHandler(dist fs.FS, index []byte, proxy http.Handler) http.Handler {
@@ -80,6 +116,17 @@ func newHandler(dist fs.FS, index []byte, proxy http.Handler) http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		for _, prefix := range proxyPrefixes {
 			if strings.HasPrefix(r.URL.Path, prefix) {
+				// These two prefixes are the only thing deciding what a
+				// browser may reach on the Pyroscope server, so the path they
+				// are matched against has to be canonical. ServeMux cleans the
+				// *escaped* path, so "%2e%2e%2f" survives it and arrives here
+				// decoded as real ".." segments — and the proxy forwards the
+				// original encoding, so an upstream that normalises would then
+				// serve whatever the traversal pointed at, allowlist bypassed.
+				if !isCanonicalPath(r.URL.Path) {
+					http.Error(w, "bad request", http.StatusBadRequest)
+					return
+				}
 				r.Body = http.MaxBytesReader(w, r.Body, 16<<20)
 				proxy.ServeHTTP(w, r)
 				return
@@ -114,7 +161,7 @@ func newHandler(dist fs.FS, index []byte, proxy http.Handler) http.Handler {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Write(index)
 	})
-	return mux
+	return withSecurityHeaders(mux)
 }
 
 func main() {
@@ -162,7 +209,11 @@ func main() {
 	case err := <-errc:
 		log.Fatal(err)
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// Hand the signal back to the default disposition straight away, so a
+		// second Ctrl-C during a slow drain kills the process instead of being
+		// swallowed by a handler that only re-cancels a finished context.
+		stop()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			log.Printf("shutdown: %v", err)

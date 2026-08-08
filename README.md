@@ -72,11 +72,28 @@ Flags / env of the server binary:
 | ---------------- | --------------- | ----------------------- | ----------------------- |
 | `-listen`        | `LISTEN`        | `:4041`                 | address to listen on    |
 | `-pyroscope-url` | `PYROSCOPE_URL` | `http://localhost:4040` | Pyroscope server to use |
+| `-version`       | —               | —                       | print the version and exit |
 
 The server embeds the built SPA and reverse-proxies
 `/querier.v1.QuerierService/*` and `/pyroscope/*` to the Pyroscope server, so
 the browser talks to a single origin and your Pyroscope server never needs
 CORS or direct exposure.
+
+### Security
+
+**Pyrolens performs no authentication or authorization.** Anyone who can
+reach it can query everything the Pyroscope server behind it will answer, so
+put it somewhere only your team can reach and front it with whatever
+authenticates your other internal tools.
+
+**The tenant switcher is not an isolation boundary.** The tenant is a URL
+parameter that becomes the `X-Scope-OrgID` header, so a user can read any
+tenant by editing the address bar. Treat it as a convenience for people who
+are already allowed to see every tenant, not as a permission check.
+
+Only the two path prefixes above are proxied; anything else is served from
+the embedded UI. Requests carrying a non-canonical path are refused rather
+than forwarded, so the prefix allowlist cannot be walked out of.
 
 ## URL parameters
 
