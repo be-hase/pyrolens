@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -39,19 +39,41 @@ export function url(
   return `${path}?${params}`;
 }
 
-/** Fails the test if the page logged an uncaught error at any point. */
-export function failOnPageErrors(page: Page): void {
-  page.on('pageerror', (error) => {
-    throw new Error(`uncaught page error: ${error.message}`);
+/**
+ * Fails the test if the page logged an uncaught error at any point. Call once
+ * at the top of a spec file; it registers its own hooks.
+ *
+ * Collected and asserted afterwards rather than thrown from the listener: a
+ * throw inside the listener escapes the test's promise chain, so an error
+ * arriving after the last `await` — a late canvas repaint, React's error path
+ * during the closing navigation — is dropped and the test still reports green.
+ */
+export function watchPageErrors(): void {
+  const seen: string[] = [];
+  test.beforeEach(({ page }) => {
+    seen.length = 0;
+    page.on('pageerror', (error) => seen.push(error.message));
+  });
+  test.afterEach(() => {
+    expect(seen, 'the page logged an uncaught error').toEqual([]);
   });
 }
 
+export interface UpstreamCall {
+  method: string;
+  tenant: string | null;
+  groupBy: string[] | null;
+  profileTypeID: string | null;
+  labelSelector: string | null;
+  start: number | null;
+  end: number | null;
+  step: number | null;
+  name: string | null;
+  limit: number | null;
+}
+
 /** What the fake upstream has been asked for, through the Go proxy. */
-export async function upstreamLog(
-  page: Page,
-): Promise<
-  { method: string; tenant: string | null; groupBy: string[] | null }[]
-> {
+export async function upstreamLog(page: Page): Promise<UpstreamCall[]> {
   const res = await page.request.get('http://127.0.0.1:4142/__log');
   return res.json();
 }

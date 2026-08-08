@@ -30,6 +30,13 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${UI_PORT}`,
     trace: 'retain-on-failure',
+    // Deliberately not the runner's locale. The UI is English throughout and
+    // formats dates and numbers with its own helpers; a `toLocale*` creeping
+    // back in is invisible on an en-US runner and ships Japanese month names
+    // to anyone else, which is a regression this project has had before.
+    // (The timezone is left alone: the specs compare timestamps they compute
+    // in Node against ones the browser parsed, so the two must agree.)
+    locale: 'ja-JP',
     screenshot: 'only-on-failure',
   },
   projects: [

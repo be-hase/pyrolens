@@ -83,6 +83,23 @@ jobs:
           code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4041/comparison)
           test "$code" = 200 || { docker logs pyrolens; exit 1; }
 
+  # Nothing else reads .goreleaser.yaml until a tag is pushed, by which point
+  # a config error costs a deleted tag and a re-cut release. Validate it at
+  # pull-request time instead.
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
+        with:
+          # Kept in step with the version release.yml pins, or this validates
+          # against a different toolchain than the one that runs.
+          version: v2.17.1
+          args: check
+
   # The browser tests drive the real binary against a fake Pyroscope replaying
   # captured fixtures (e2e/README.md), so they need both toolchains.
   e2e:

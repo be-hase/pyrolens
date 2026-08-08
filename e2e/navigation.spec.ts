@@ -1,23 +1,31 @@
 import { expect, test } from '@playwright/test';
-import { failOnPageErrors, url } from './helpers.ts';
+import { url, watchPageErrors } from './helpers.ts';
 
 // What the binary serves, and how the SPA behaves on top of it. main_test.go
 // checks the same routes at the Go level; this checks the browser agrees.
 
-test.beforeEach(({ page }) => failOnPageErrors(page));
+watchPageErrors();
 
 test('every view deep-links straight from the address bar', async ({
   page,
 }) => {
-  for (const [path, heading] of [
-    ['/', 'Flamegraph'],
-    ['/comparison', 'Comparison'],
-    ['/diff', 'Diff'],
-    ['/explore', 'Group by'],
+  // The marker has to be something only that view draws. 'Comparison' and
+  // 'Diff' are permanent NavBar tab labels, so asserting on those went green
+  // for a view that rendered nothing at all — including on `/`.
+  for (const [path, tab, marker] of [
+    ['/', 'Single', '.flamegraph-wrapper'],
+    ['/comparison', 'Comparison', '.comparison-pane'],
+    ['/diff', 'Diff', '.flamegraph-wrapper'],
+    ['/explore', 'Tag Explorer', '.tag-explorer-table'],
   ] as const) {
     const response = await page.goto(url(path));
     expect(response?.status(), path).toBe(200);
-    await expect(page.getByText(heading).first(), path).toBeVisible();
+    await expect(page.locator(marker).first(), path).toBeVisible();
+    // Which view the router actually resolved, rather than which links exist.
+    await expect(
+      page.locator('.navbar-tab[aria-current="page"]'),
+      path,
+    ).toHaveText(tab);
   }
 });
 
