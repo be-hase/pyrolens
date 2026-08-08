@@ -30,7 +30,13 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>,
     );
     assert.match(document.body.textContent ?? '', /Something went wrong/);
-    assert.match(document.body.textContent ?? '', /different query or time/);
+    // The message has to name a recovery the user can actually reach: the
+    // query bar and range picker are inside this boundary and are gone with
+    // the subtree, so telling them to change the query was a dead end.
+    assert.match(
+      document.body.textContent ?? '',
+      /Go back|another view|reload/,
+    );
   });
 
   it('uses the fallback it was given', () => {

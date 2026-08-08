@@ -149,7 +149,15 @@ function formatMatchers(matchers: Matcher[]): string {
  * something malformed rather than leaving the field blank.
  */
 export function isMalformedQuery(query: string): boolean {
-  return query.trim() !== '' && parseMatchers(query) === null;
+  if (query.trim() === '') return false;
+  const matchers = parseMatchers(query);
+  if (matchers === null) return true;
+  // A profile_type constraint the API cannot express is treated as malformed
+  // rather than dropped: the querier takes a single profileTypeID, so `=~` or
+  // `!=` on the pseudo-label can be neither sent nor honoured. Silently
+  // stripping it left the user's filter out of the request — or, when it was
+  // the only profile_type matcher, left the screen blank with no explanation.
+  return matchers.some((m) => isProfileTypeLabel(m.label) && m.op !== '=');
 }
 
 export function splitQuery(query: string): {

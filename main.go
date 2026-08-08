@@ -28,10 +28,55 @@ var distFS embed.FS
 // Set by the linker at release time (-X main.version=...).
 var version = "dev"
 
-// Paths forwarded to the Pyroscope server. Everything else is the SPA.
-var proxyPrefixes = []string{
-	"/querier.v1.QuerierService/",
-	"/pyroscope/",
+const querierPrefix = "/querier.v1.QuerierService/"
+
+// The querier RPCs the UI calls, and nothing else. Each one is registered as
+// its own route below, so what the browser can reach upstream is a decision
+// stated here rather than a side effect of whatever the Pyroscope server
+// happens to expose. Adding a call in src/api/client.ts means adding it here
+// too — that coupling is the point.
+//
+// This replaced a pair of path prefixes. "/pyroscope/*" was one of them and
+// the UI has never called it, but a real Pyroscope serves its legacy HTTP API
+// there — /pyroscope/ingest included, which answers POST. That turned a
+// read-only viewer into a write path: anything that could reach this binary
+// could store profiles under any tenant. Verified by ingesting through the
+// proxy and reading the service back out of Pyroscope.
+var querierMethods = []string{
+	"Diff",
+	"LabelNames",
+	"LabelValues",
+	"SelectMergeStacktraces",
+	"SelectSeries",
+	"Series",
+}
+
+// Connect-JSON is POST-only, and the client sends nothing else.
+const maxRequestBody = 16 << 20
+
+// How long a termination signal waits for in-flight queries. Long enough for
+// a normal merge to finish, short enough to stay inside a container runtime's
+// default grace period — a profile query that outlives it is still cut off,
+// which is why the timeouts above it are not the drain budget.
+const shutdownGrace = 25 * time.Second
+
+// Sent on every response. The proxy renders bytes from the Pyroscope server
+// on this origin, so a CSP here is what stops upstream-controlled HTML from
+// running with the UI's origin, and nosniff removes the MIME-confusion path
+// around the embedded assets. The SPA needs no inline script; React's style
+// props are applied through CSSOM, not style attributes, and every request it
+// makes is same-origin.
+const contentSecurityPolicy = "default-src 'self'; img-src 'self' data:; " +
+	"style-src 'self' 'unsafe-inline'; connect-src 'self'; " +
+	"frame-ancestors 'none'; base-uri 'none'; object-src 'none'"
+
+func withSecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		next.ServeHTTP(w, r)
+	})
 }
 
 func envOr(key, fallback string) string {
@@ -77,14 +122,24 @@ func newHandler(dist fs.FS, index []byte, proxy http.Handler) http.Handler {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintln(w, "ok")
 	})
+
+	// One route per RPC, method included, so the mux does the matching: a verb
+	// the client never sends is a 405 and an RPC the UI does not call is a 404,
+	// both before anything reaches the proxy. Exact paths also settle path
+	// traversal — an encoded "%2e%2e%2f" decodes into the method name and
+	// matches no route.
+	forward := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+		proxy.ServeHTTP(w, r)
+	})
+	for _, method := range querierMethods {
+		mux.Handle("POST "+querierPrefix+method, forward)
+	}
+	// Anything else under the service prefix is an API path, so answer like
+	// one instead of falling through to the SPA shell.
+	mux.HandleFunc(querierPrefix, http.NotFound)
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		for _, prefix := range proxyPrefixes {
-			if strings.HasPrefix(r.URL.Path, prefix) {
-				r.Body = http.MaxBytesReader(w, r.Body, 16<<20)
-				proxy.ServeHTTP(w, r)
-				return
-			}
-		}
 		// Serve real files as-is; anything unknown falls back to the SPA
 		// shell so history-based routes (/comparison, /diff, ...) deep-link.
 		path := strings.TrimPrefix(r.URL.Path, "/")
@@ -114,7 +169,7 @@ func newHandler(dist fs.FS, index []byte, proxy http.Handler) http.Handler {
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Write(index)
 	})
-	return mux
+	return withSecurityHeaders(mux)
 }
 
 func main() {
@@ -162,7 +217,11 @@ func main() {
 	case err := <-errc:
 		log.Fatal(err)
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// Hand the signal back to the default disposition straight away, so a
+		// second Ctrl-C during a slow drain kills the process instead of being
+		// swallowed by a handler that only re-cancels a finished context.
+		stop()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			log.Printf("shutdown: %v", err)

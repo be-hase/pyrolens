@@ -5,6 +5,7 @@ import { useDebouncedValue } from './useDebouncedValue';
 import {
   escapeValue,
   isInternalLabel,
+  isValidLabelName,
   toDisplayLabel,
   toInternalLabel,
 } from '../queryLang';
@@ -164,7 +165,15 @@ export function useLabelSuggestions({
         if (controller.signal.aborted) return;
         // The server calls it `__profile_type__`; the query language shows
         // `profile_type`, so it has to be offered under that name.
-        setNames(ns.map(toDisplayLabel).filter((n) => !isInternalLabel(n)));
+        // Validated, not just filtered: applySuggestion splices the chosen
+        // name into the query text, so a server returning something like
+        // `x="1",service_name` would smuggle extra matchers into the
+        // selector the user thinks they built.
+        setNames(
+          ns
+            .map(toDisplayLabel)
+            .filter((n) => !isInternalLabel(n) && isValidLabelName(n)),
+        );
       })
       .catch(() => {});
     return () => controller.abort();

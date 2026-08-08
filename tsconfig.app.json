@@ -29,7 +29,6 @@
       "@api/*": ["./src/api/*"],
       "@lib/*": ["./src/lib/*"],
       "@views/*": ["./src/views/*"],
-      "@public/*": ["./public/*"]
     }
   },
   "include": ["src"],

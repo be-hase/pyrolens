@@ -25,9 +25,10 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    // Mirrors the binary's allowlist (see proxyPrefixes in main.go), so the
+    // dev server cannot reach anything the built server refuses.
     proxy: {
       '/querier.v1.QuerierService': pyroscopeUrl,
-      '/pyroscope': pyroscopeUrl,
     },
   },
 });

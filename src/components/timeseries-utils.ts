@@ -186,7 +186,14 @@ export function axisTicks(
     return round((ms - offsetMs) / stepMs) * stepMs + offsetMs;
   };
 
+  // The first tick is snapped with the offset read at `startMs`, so when the
+  // transition falls between `startMs` and that boundary it lands an hour off
+  // — and the next round then skips the real boundary after it, dropping a
+  // whole day from the axis. Re-snap it with its own offset.
   let ts = snap(startMs, Math.ceil);
+  const resnapped = snap(ts, Math.round);
+  ts = resnapped >= startMs ? resnapped : snap(ts + stepMs, Math.round);
+
   while (ts <= end) {
     if (ts >= startMs) out.push(ts);
     // Re-snapping can land on the tick we came from when the offset shifts;

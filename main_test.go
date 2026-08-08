@@ -47,6 +47,13 @@ func get(t *testing.T, h http.Handler, target string) *httptest.ResponseRecorder
 	return rec
 }
 
+func post(t *testing.T, h http.Handler, target string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, target, nil))
+	return rec
+}
+
 // quietLogs keeps the proxy's error logging out of the test output.
 func quietLogs(t *testing.T) {
 	t.Helper()
@@ -160,15 +167,16 @@ func TestMissingFileIsNotFound(t *testing.T) {
 }
 
 func TestProxiesQueryPaths(t *testing.T) {
-	proxied := []string{
+	for _, path := range []string{
 		"/querier.v1.QuerierService/LabelNames",
+		"/querier.v1.QuerierService/LabelValues",
+		"/querier.v1.QuerierService/Series",
+		"/querier.v1.QuerierService/SelectSeries",
 		"/querier.v1.QuerierService/SelectMergeStacktraces",
-		"/pyroscope/render",
-		"/pyroscope/",
-	}
-	for _, path := range proxied {
+		"/querier.v1.QuerierService/Diff",
+	} {
 		h, proxy := newTestHandler()
-		get(t, h, path)
+		post(t, h, path)
 		if !proxy.called {
 			t.Errorf("%s: was not proxied", path)
 			continue
@@ -178,21 +186,86 @@ func TestProxiesQueryPaths(t *testing.T) {
 		}
 	}
 
-	notProxied := []string{
-		"/querier.v1.QuerierService",
+	// "/pyroscope/*" is deliberately not routed: a real Pyroscope serves its
+	// legacy HTTP API there, /pyroscope/ingest included, and the UI has never
+	// called any of it. Forwarding it turned a read-only viewer into a write
+	// path.
+	for _, path := range []string{
 		"/pyroscope",
+		"/pyroscope/",
+		"/pyroscope/render",
+		"/pyroscope/ingest",
 		"/api/pyroscope/render",
 		"/",
-	}
-	for _, path := range notProxied {
+	} {
 		h, proxy := newTestHandler()
-		get(t, h, path)
+		post(t, h, path)
 		if proxy.called {
 			t.Errorf("%s: reached the proxy but is a UI path", path)
 		}
 	}
 }
 
+func TestSecurityHeaders(t *testing.T) {
+	h, _ := newTestHandler()
+	// Every response, not just the shell: the proxy puts upstream-controlled
+	// bytes on this origin, which is what the CSP is there to contain.
+	for _, path := range []string{"/", "/healthz", "/favicon.svg"} {
+		rec := get(t, h, path)
+		if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+			t.Errorf("%s: nosniff got %q", path, got)
+		}
+		csp := rec.Header().Get("Content-Security-Policy")
+		for _, want := range []string{"default-src 'self'", "frame-ancestors 'none'"} {
+			if !strings.Contains(csp, want) {
+				t.Errorf("%s: csp %q is missing %q", path, csp, want)
+			}
+		}
+	}
+}
+
+func TestOnlyTheMethodsTheUIUsesAreProxied(t *testing.T) {
+	// Each RPC the UI calls is its own route, so the mux refuses everything
+	// else before the proxy sees it.
+	for _, target := range []string{
+		// Real querier RPCs this UI has no use for.
+		"/querier.v1.QuerierService/ProfileTypes",
+		"/querier.v1.QuerierService/AnalyzeQuery",
+		"/querier.v1.QuerierService/",
+		// Traversal falls out of the same routing: the encoding decodes into
+		// the method name and matches no route.
+		"/querier.v1.QuerierService/%2e%2e%2fadmin",
+		"/querier.v1.QuerierService/%2e%2e%2f%2e%2e%2fingest",
+		"/querier.v1.QuerierService/Series%2f..%2fingest",
+	} {
+		h, proxy := newTestHandler()
+		rec := post(t, h, target)
+		if proxy.called {
+			t.Errorf("%s: reached the proxy", target)
+		}
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s: status got %d, want 404", target, rec.Code)
+		}
+	}
+}
+
+func TestQuerierRoutesArePostOnly(t *testing.T) {
+	// Connect-JSON is POST-only and the client sends nothing else, so any
+	// other verb against a real RPC must not be forwarded. Which 4xx the mux
+	// picks is its own business (405 when only the method differs, 404 when
+	// the subtree handler answers first); that it refuses is ours.
+	for _, verb := range []string{http.MethodGet, http.MethodDelete, http.MethodPut} {
+		h, proxy := newTestHandler()
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(verb, "/querier.v1.QuerierService/Series", nil))
+		if proxy.called {
+			t.Errorf("%s: reached the proxy", verb)
+		}
+		if rec.Code < 400 || rec.Code >= 500 {
+			t.Errorf("%s: status got %d, want a 4xx", verb, rec.Code)
+		}
+	}
+}
 func TestProxyForwardsToUpstreamWithItsOwnHost(t *testing.T) {
 	var gotHost, gotPath, gotQuery string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -242,7 +315,7 @@ func TestProxyErrorKeepsDetailOutOfTheBrowser(t *testing.T) {
 	}
 	h := newHandler(testDist(), []byte(indexHTML), newProxy(target))
 
-	rec := get(t, h, "/querier.v1.QuerierService/LabelNames")
+	rec := post(t, h, "/querier.v1.QuerierService/LabelNames")
 	if rec.Code != http.StatusBadGateway {
 		t.Errorf("status: got %d, want 502", rec.Code)
 	}

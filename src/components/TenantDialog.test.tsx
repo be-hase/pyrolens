@@ -62,6 +62,18 @@ describe('TenantDialog', () => {
     assert.ok(screen.getByRole('dialog'));
   });
 
+  it('lets the pointer put focus back in the field', async () => {
+    // The backdrop cancels mousedown so a click outside cannot drop focus to
+    // <body> and let Tab escape to the app behind the overlay. That guard has
+    // to stop at the backdrop itself: React bubbles the event, so cancelling
+    // it for the whole subtree also cancels focusing the input, and the user
+    // can neither click into the field nor select the text in it.
+    const { user, input, submit } = setup('team-a');
+    submit.focus();
+    await user.click(input);
+    assert.ok(document.activeElement === input);
+  });
+
   it('keeps Tab inside the dialog', async () => {
     const { user, input, submit } = setup('team-a');
     input.focus();

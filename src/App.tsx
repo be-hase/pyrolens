@@ -163,7 +163,12 @@ export function App() {
   const showTenantDialog =
     status === 'multi' && ((!tenant && !storedTenant) || changingTenant);
 
-  const query = params.get('query') ?? '';
+  // `null` (no param at all) and `''` (the user cleared it) are different:
+  // only the former gets a default written in, or Run on an empty query bar
+  // would be undone by the default-query effect below and the field could
+  // never be cleared.
+  const rawQuery = params.get('query');
+  const query = rawQuery ?? '';
   const from = params.get('from') ?? DEFAULT_FROM;
   const until = params.get('until') ?? DEFAULT_UNTIL;
   // Memoized so the resolved range object only moves on URL change.
@@ -187,7 +192,7 @@ export function App() {
   // No query in the URL yet: default to the first service and its preferred
   // profile type, written back into the URL (replace, so Back still works).
   useEffect(() => {
-    if (!ready || query || services.length === 0) return;
+    if (!ready || rawQuery !== null || services.length === 0) return;
     const first = services[0];
     const profileType = sortProfileTypes(first.profileTypes)[0];
     if (!profileType) return;
@@ -195,7 +200,7 @@ export function App() {
       set: { query: buildQuery(first.name, profileType) },
       replace: true,
     });
-  }, [ready, query, services]);
+  }, [ready, rawQuery, services]);
 
   return (
     <div className="app">

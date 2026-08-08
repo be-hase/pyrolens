@@ -72,6 +72,24 @@ describe('navigate', () => {
     assert.ok(window.history.length > before);
   });
 
+  it('does not stack an entry for a navigation that changes nothing', () => {
+    // Pressing Run without editing anything is a refresh, not a new place:
+    // it still has to fire the event (that is what re-resolves a relative
+    // range), but five presses must not cost five presses of Back, each one
+    // refetching on the way past.
+    navigate({ path: '/diff', set: { query: '{a="b"}' } });
+    const after = window.history.length;
+    let events = 0;
+    const count = () => events++;
+    window.addEventListener('pyroscope:navigate', count);
+    navigate({ set: { query: '{a="b"}' } });
+    navigate({ set: { query: '{a="b"}' } });
+    window.removeEventListener('pyroscope:navigate', count);
+
+    assert.equal(window.history.length, after);
+    assert.equal(events, 2);
+  });
+
   it('replaces the entry when asked, so Back still works', () => {
     navigate({ set: { tenant: 'team-a' } });
     const after = window.history.length;
