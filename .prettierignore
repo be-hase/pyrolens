@@ -1,4 +1,5 @@
 .claude/
+coverage/
 
 .prettierrc
 .yarnrc.yml
