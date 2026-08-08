@@ -45,13 +45,15 @@ test('the single view renders a flame graph and a timeline', async ({
 test('axis dates stay fixed English whatever the browser locale is', async ({
   page,
 }) => {
-  // The browser runs as ja-JP (playwright.config.ts). A day-wide range puts
-  // the axis on its date branch, which must come from the project's own
-  // helpers — a `toLocale*` here would render 1月2日 and has shipped once.
+  // The browser runs as ja-JP (playwright.config.ts). The axis only reaches
+  // its date branch at a day-scale tick step, which tickStepMs picks between
+  // roughly 6 and 12 days — a shorter range gets 12-hour steps and HH:MM
+  // labels, which would not exercise this at all. The labels must come from
+  // the project's own helpers; a `toLocale*` here renders 1月2日, and has.
   const day = 86_400_000;
   await page.goto(
     url('/', {
-      from: meta.window.end - 5 * day,
+      from: meta.window.end - 10 * day,
       until: meta.window.end,
     }),
   );
