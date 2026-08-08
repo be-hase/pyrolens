@@ -120,13 +120,20 @@ export function profileTypeLabel(profileTypeID: string): string {
   return profileTypeID.split(':')[1] || profileTypeID;
 }
 
+/**
+ * Byte order, not locale order. These lists decide which service and profile
+ * type App writes into the URL as the default query, so a browser-dependent
+ * collation would hand two colleagues different starting screens — and the
+ * same rule that keeps `toLocale*` out of the UI applies to ordering.
+ */
+const byName = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
 /** Sorts profile type IDs for display: cpu first, then by label. */
 export function sortProfileTypes(profileTypes: string[]): string[] {
   const rank = (id: string) => (profileTypeLabel(id) === 'cpu' ? 0 : 1);
   return [...profileTypes].sort(
     (a, b) =>
-      rank(a) - rank(b) ||
-      profileTypeLabel(a).localeCompare(profileTypeLabel(b)),
+      rank(a) - rank(b) || byName(profileTypeLabel(a), profileTypeLabel(b)),
   );
 }
 
@@ -169,7 +176,7 @@ export async function fetchServices(
 
   return [...byService]
     .map(([name, types]) => ({ name, profileTypes: [...types] }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => byName(a.name, b.name));
 }
 
 // --- Flamegraphs -------------------------------------------------------------
@@ -266,7 +273,14 @@ export async function fetchTimeline(
     signal,
   );
   const series = res.series ?? [];
-  if (series.length <= 1) return toPoints(series[0]?.points);
+  // Sorted even in the single-series case: the multi-series path below merges
+  // through a map and sorts, so leaving one series in wire order made the same
+  // data draw a self-crossing line depending only on how many series arrived.
+  if (series.length <= 1) {
+    return toPoints(series[0]?.points).sort(
+      (a, b) => a.timestamp - b.timestamp,
+    );
+  }
 
   // No groupBy was requested, but the server returned several series: sum
   // them per timestamp so callers always see a single line.

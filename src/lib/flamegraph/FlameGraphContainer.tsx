@@ -135,7 +135,14 @@ const FlameGraphContainer = ({
     );
     setCollapsedMap(container.getCollapsedMap());
     return container;
-  }, [data, theme, disableCollapsing]);
+    // `theme` is deliberately not a dependency. It reaches the container only
+    // as an argument to getDisplayProcessor, and this project's format.ts
+    // ignores it — so a theme flip produced a new container that changed
+    // nothing, which reset the collapsed map here and tripped the
+    // reset-on-data-change effect below into throwing away the user's zoom
+    // and sandwich view. Changing a colour must not move the view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, disableCollapsing]);
   const [colorScheme, setColorScheme] = useColorScheme(dataContainer);
   const matchedLabels = useLabelSearch(search, dataContainer);
 

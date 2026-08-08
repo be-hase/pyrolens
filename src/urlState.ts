@@ -77,7 +77,12 @@ export function buildUrl(opts: NavigateOptions): string {
 
 export function navigate(opts: NavigateOptions): void {
   const url = buildUrl(opts);
-  if (opts.replace) window.history.replaceState(null, '', url);
+  // A navigation that changes nothing must still fire the event — that is
+  // what makes Run a real refresh for a relative range — but it must not
+  // stack a history entry, or five presses of Run cost five Backs to undo
+  // and each one refetches on the way past.
+  const unchanged = url === window.location.pathname + window.location.search;
+  if (opts.replace || unchanged) window.history.replaceState(null, '', url);
   else window.history.pushState(null, '', url);
   window.dispatchEvent(new Event(NAV_EVENT));
 }

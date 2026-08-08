@@ -444,4 +444,19 @@ describe('isMalformedQuery', () => {
     assert.equal(isMalformedQuery('this is garbage {{{'), true);
     assert.equal(isMalformedQuery('{unclosed="a"'), true);
   });
+
+  it('rejects a profile_type the API cannot express', () => {
+    // The querier takes one profileTypeID, so a regex or a negation on the
+    // pseudo-label can be neither sent nor honoured. splitQuery drops it, so
+    // without this the user's filter silently vanished from the request —
+    // and when it was the only profile_type matcher, the screen just sat
+    // blank with nothing to explain why.
+    assert.equal(isMalformedQuery('{profile_type=~"process.*"}'), true);
+    assert.equal(isMalformedQuery('{profile_type!="memory:a:b:c:d"}'), true);
+    assert.equal(isMalformedQuery('{__profile_type__!~"x"}'), true);
+    assert.equal(
+      isMalformedQuery('{service_name="a", profile_type="cpu:a:b:c:d"}'),
+      false,
+    );
+  });
 });
