@@ -74,7 +74,7 @@ describe('NavBar', () => {
 
   it('hides the tenant button in single-tenant mode', () => {
     setup();
-    assert.equal(screen.queryByTitle('Change tenant'), null);
+    assert.ok(!screen.queryByTitle('Change tenant'));
   });
 
   it('shows the active tenant and offers to change it', () => {

@@ -13,6 +13,9 @@ import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 
 const PORT = Number(process.env.PORT ?? 4142);
+// A server without -auth.multitenancy-enabled answers the probe instead of
+// refusing it, and the UI then shows no tenant anything at all.
+const MULTITENANT = process.env.MULTITENANT !== '0';
 const DIR = fileURLToPath(new URL('fixtures/', import.meta.url));
 const PREFIX = '/querier.v1.QuerierService/';
 
@@ -73,7 +76,7 @@ const server = createServer(async (req, res) => {
 
   // The tenancy probe: an empty org id is what the UI sends to find out
   // whether this server wants one.
-  if (tenant === '') return json(401, noTenant);
+  if (tenant === '' && MULTITENANT) return json(401, noTenant);
 
   // A selector naming some other service gets the empty answer the server
   // really gives, so the UI's "no data" state is reachable on purpose rather
@@ -96,5 +99,6 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(`fake pyroscope on http://127.0.0.1:${PORT}`);
+  const mode = MULTITENANT ? 'multitenant' : 'single-tenant';
+  console.log(`fake pyroscope on http://127.0.0.1:${PORT} (${mode})`);
 });

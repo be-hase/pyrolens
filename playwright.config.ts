@@ -11,6 +11,10 @@ import { defineConfig, devices } from '@playwright/test';
 
 const UI_PORT = 4141;
 const UPSTREAM_PORT = 4142;
+// A second pair, wired to a fake that does not ask for a tenant, so the flow
+// where no tenant UI appears at all is exercised too.
+const SINGLE_UI_PORT = 4143;
+const SINGLE_UPSTREAM_PORT = 4144;
 
 export default defineConfig({
   testDir: 'e2e',
@@ -30,7 +34,17 @@ export default defineConfig({
   },
   projects: [
     {
+      name: 'single-tenant',
+      testMatch: /single-tenant\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1500, height: 950 },
+        baseURL: `http://127.0.0.1:${SINGLE_UI_PORT}`,
+      },
+    },
+    {
       name: 'chromium',
+      testIgnore: /single-tenant\.spec\.ts/,
       // Wide enough that the flame graph keeps its top table; below about
       // 1000px it drops to the graph alone and the frame names disappear.
       use: {
@@ -50,6 +64,19 @@ export default defineConfig({
     {
       command: `./pyrolens -listen 127.0.0.1:${UI_PORT} -pyroscope-url http://127.0.0.1:${UPSTREAM_PORT}`,
       url: `http://127.0.0.1:${UI_PORT}/healthz`,
+      reuseExistingServer: !process.env.CI,
+      stdout: 'pipe',
+    },
+    {
+      command: `node e2e/fake-pyroscope.mjs`,
+      env: { PORT: String(SINGLE_UPSTREAM_PORT), MULTITENANT: '0' },
+      url: `http://127.0.0.1:${SINGLE_UPSTREAM_PORT}/__log`,
+      reuseExistingServer: !process.env.CI,
+      stdout: 'pipe',
+    },
+    {
+      command: `./pyrolens -listen 127.0.0.1:${SINGLE_UI_PORT} -pyroscope-url http://127.0.0.1:${SINGLE_UPSTREAM_PORT}`,
+      url: `http://127.0.0.1:${SINGLE_UI_PORT}/healthz`,
       reuseExistingServer: !process.env.CI,
       stdout: 'pipe',
     },
