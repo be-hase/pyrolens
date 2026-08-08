@@ -169,6 +169,23 @@ await save(
   await post('Diff', { left: profile(left), right: profile(right) }),
 );
 
+// What the server says when the selector matches nothing. The UI has an
+// explicit "no data" state, and the only way to reach it deterministically is
+// to replay a real empty answer rather than a hand-made one.
+const missing = {
+  profileTypeID: PROFILE_TYPE,
+  labelSelector: '{service_name="does-not-exist"}',
+  ...window,
+};
+await save(
+  'SelectMergeStacktraces.empty',
+  await post('SelectMergeStacktraces', missing),
+);
+await save(
+  'SelectSeries.empty',
+  await post('SelectSeries', { ...missing, step: 15 }),
+);
+
 // The refusal a multitenant server gives when no tenant is supplied. The
 // tenant dialog appears on the strength of this body, so it is captured
 // rather than guessed.

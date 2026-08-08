@@ -127,9 +127,20 @@ test('the tag explorer groups by the label the URL names', async ({ page }) => {
 test('an empty profile says so instead of drawing nothing', async ({
   page,
 }) => {
-  // A query for a profile type the fixtures have nothing for.
+  // A selector that matches nothing, which the fake upstream answers the way
+  // the real server does: a single root of width zero.
   await page.goto(
-    url('/', { query: '{service_name="nope", profile_type="a:b:c:d:e"}' }),
+    url('/', {
+      query: `{service_name="nope", profile_type="${meta.profileType}"}`,
+    }),
   );
-  await expect(page.locator('.empty').first()).toBeVisible();
+
+  const empty = page.locator('.empty').first();
+  await expect(empty).toBeVisible();
+  // And it is still empty once the response has landed. Asserting only that
+  // the placeholder appeared would pass on the flash of it shown while the
+  // first request is in flight, whatever the answer turned out to be — which
+  // is how this test came to fail once on main and pass everywhere else.
+  await expect(page.locator('.plfg-canvas-graph')).toHaveCount(0);
+  await expect(empty).toBeVisible();
 });
