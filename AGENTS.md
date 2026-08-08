@@ -50,6 +50,7 @@ yarn type-check     # tsc -b
 yarn lint           # eslint
 yarn format         # prettier --check   (format:fix to write)
 yarn test           # vitest: units, hooks and components (jsdom)
+yarn test:coverage  # the same, with a report of what has no unit test
 yarn test:e2e       # playwright: the real binary against captured fixtures
 yarn build          # -> dist/
 
@@ -93,9 +94,12 @@ the binaries and the image.
   replaying responses captured from a real one. See `e2e/README.md` before
   touching the fixtures; a scheduled job re-captures against a live server and
   fails when the responses no longer have the shape they were recorded with.
-- `src/components/timeseries-utils.ts`, `src/views/tagExplorerData.ts` — the
-  arithmetic both charts and the breakdown table would otherwise hide inside a
-  component, kept out here so it can be checked directly.
+- `src/components/timeseries-utils.ts`, `src/views/tagExplorerData.ts`,
+  `src/hooks/useEditBuffer.ts` — the arithmetic and the state rules the views
+  and charts would otherwise hide inside a component, kept out here so they
+  can be checked directly. `yarn test:coverage` reads 0% for the views and the
+  canvases because only the browser suite reaches them, which it does not
+  count.
 
 ## Rules that are easy to break
 
@@ -204,6 +208,10 @@ Report honestly what you ran and what you did not.
   floating panels use `--shadow-md`, modals `--shadow-lg`; filled buttons use
   `--color-primary-strong`, which is a step darker than the accent so white
   label text stays legible. Reach for a token before inventing a value.
+- **Assert on a boolean, not on a DOM node.** `assert.equal(queryBy…(), null)`
+  reads fine and passes fine, but when it fails node:assert tries to diff a
+  jsdom element and walks the whole document graph — a worker that dies of
+  memory exhaustion a minute later instead of a one-line failure. `assert.ok(!…)`.
 - Comments say why, not what — a comment earns its place by recording a
   constraint the code cannot show. Errors are for the person stuck: say what
   happened and what to do next.

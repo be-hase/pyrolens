@@ -1,8 +1,8 @@
-import { useState } from 'react';
 import { Panel } from '@components/Panel';
 import { QueryBar } from '@components/QueryBar';
 import { TimeSeries } from '@components/TimeSeries';
 import { useTimeline } from '@hooks/useProfileData';
+import { useEditBuffer } from '@hooks/useEditBuffer';
 import { splitQuery } from '../queryLang';
 import { formatRangeLabel, type TimeRange } from '../time';
 import { navigate } from '../urlState';
@@ -33,14 +33,7 @@ export function ComparisonPane({
   });
   const { profileTypeID } = splitQuery(pane.query);
 
-  // Query-bar edit buffer, reset when the pane's URL query changes
-  // (render-time adjustment, not an effect).
-  const [draft, setDraft] = useState<string | null>(null);
-  const [prevQuery, setPrevQuery] = useState(pane.query);
-  if (prevQuery !== pane.query) {
-    setPrevQuery(pane.query);
-    setDraft(null);
-  }
+  const [draft, setDraft] = useEditBuffer(pane.query);
 
   return (
     <Panel
@@ -49,7 +42,7 @@ export function ComparisonPane({
     >
       <div className="comparison-pane">
         <QueryBar
-          query={draft ?? pane.query}
+          query={draft}
           onQueryChange={setDraft}
           onRun={(q) => navigate({ set: { [`${pane.side}Query`]: q } })}
           start={mainRange.start}

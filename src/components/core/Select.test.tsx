@@ -69,7 +69,7 @@ describe('Select', () => {
     const { trigger } = setup();
     fireEvent.click(trigger);
     fireEvent.click(trigger);
-    assert.equal(screen.queryByText('Light'), null);
+    assert.ok(!screen.queryByText('Light'));
   });
 
   it('does not report a change for the option already selected', () => {

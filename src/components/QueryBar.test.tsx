@@ -97,7 +97,7 @@ describe('QueryBar', () => {
   it('asks for nothing until the field is being edited', async () => {
     setup('{');
     await settle();
-    assert.equal(listbox(), null);
+    assert.ok(!listbox());
     assert.equal(input().getAttribute('aria-expanded'), 'false');
     assert.equal(namesOf.mock.calls.length, 0);
   });
@@ -183,7 +183,7 @@ describe('QueryBar', () => {
     await settle();
     assert.ok(listbox());
     fireEvent.keyDown(input(), { key: 'Escape' });
-    assert.equal(listbox(), null);
+    assert.ok(!listbox());
     assert.deepEqual(changes, ['{']);
   });
 
@@ -192,7 +192,7 @@ describe('QueryBar', () => {
     type('{');
     await settle();
     fireEvent.blur(input());
-    assert.equal(listbox(), null);
+    assert.ok(!listbox());
   });
 
   it('closes the popup when the query is run', async () => {
@@ -200,14 +200,14 @@ describe('QueryBar', () => {
     type('{');
     await settle();
     fireEvent.click(runButton());
-    assert.equal(listbox(), null);
+    assert.ok(!listbox());
   });
 
   it('offers nothing once the selector is closed behind the caret', async () => {
     setup();
     type('{a="b"} ');
     await settle();
-    assert.equal(listbox(), null);
+    assert.ok(!listbox());
   });
 
   it('leaves the arrow keys alone while the popup is closed', () => {

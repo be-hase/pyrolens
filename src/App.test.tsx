@@ -79,7 +79,7 @@ describe('App tenancy', () => {
     await waitFor(() => assert.ok(screen.getByTestId('single')));
     assert.equal(seen('query'), '{a="b"}');
     assert.equal(seen('tenant'), '');
-    assert.equal(screen.queryByRole('dialog'), null);
+    assert.ok(!screen.queryByRole('dialog'));
   });
 
   it('asks for a tenant when the server is multi-tenant', async () => {
@@ -88,7 +88,7 @@ describe('App tenancy', () => {
     await waitFor(() => assert.ok(screen.getByRole('dialog')));
     // Nothing may be queried before a tenant is chosen.
     assert.equal(servicesOf.mock.calls.length, 0);
-    assert.equal(screen.queryByTestId('single'), null);
+    assert.ok(!screen.queryByTestId('single'));
   });
 
   it('adopts the tenant from the URL', async () => {
@@ -96,7 +96,7 @@ describe('App tenancy', () => {
     at('/?tenant=team-a&query=%7B%7D');
     render(<App />);
     await waitFor(() => assert.equal(seen('tenant'), 'team-a'));
-    assert.equal(screen.queryByRole('dialog'), null);
+    assert.ok(!screen.queryByRole('dialog'));
   });
 
   it('writes a remembered tenant back into the URL', async () => {
@@ -128,7 +128,7 @@ describe('App tenancy', () => {
       ),
     );
     assert.match(document.body.textContent ?? '', /connection refused/);
-    assert.equal(screen.queryByTestId('single'), null);
+    assert.ok(!screen.queryByTestId('single'));
   });
 
   it('sets the tenant header before anything is fetched for it', async () => {

@@ -38,3 +38,6 @@ dist-ssr
 
 # Local screenshots from dev/screenshot.mjs
 /dev/screenshots/
+
+# Coverage output
+/coverage/

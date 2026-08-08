@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import type { ViewProps } from '../App';
 import { ControlsBar } from '@components/ControlsBar';
 import { FlameGraph } from '@components/FlameGraph';
@@ -6,6 +5,7 @@ import { Panel } from '@components/Panel';
 import { QueryBar } from '@components/QueryBar';
 import { TimeSeries } from '@components/TimeSeries';
 import { useFlamegraph, useTimeline } from '@hooks/useProfileData';
+import { useEditBuffer } from '@hooks/useEditBuffer';
 import { profileTypeLabel } from '@api/client';
 import { parseQuery, splitQuery } from '../queryLang';
 import { formatRangeLabel } from '../time';
@@ -26,22 +26,14 @@ export function SingleView({
   const { profileTypeID } = splitQuery(query);
   const parsed = parseQuery(query);
 
-  // Local edit buffer for the query bar; the URL only changes on Run. The
-  // buffer resets whenever the URL's query changes (render-time adjustment,
-  // per https://react.dev/learn/you-might-not-need-an-effect).
-  const [draft, setDraft] = useState<string | null>(null);
-  const [prevQuery, setPrevQuery] = useState(query);
-  if (prevQuery !== query) {
-    setPrevQuery(query);
-    setDraft(null);
-  }
+  const [draft, setDraft] = useEditBuffer(query);
 
   return (
     <div className="app-content">
       <ControlsBar services={services} servicesLoading={servicesLoading} />
 
       <QueryBar
-        query={draft ?? query}
+        query={draft}
         onQueryChange={setDraft}
         onRun={(q) => navigate({ set: { query: q } })}
         start={range.start}

@@ -34,7 +34,7 @@ function Menu({
 describe('Dropdown', () => {
   it('renders nothing until it is opened', () => {
     render(<Menu label="Menu" />);
-    assert.equal(screen.queryByText('Menu item'), null);
+    assert.ok(!screen.queryByText('Menu item'));
     fireEvent.click(screen.getByText('Menu'));
     assert.ok(screen.getByText('Menu item'));
   });
@@ -48,7 +48,7 @@ describe('Dropdown', () => {
     );
     fireEvent.click(screen.getByText('Menu'));
     fireEvent.mouseDown(screen.getByText('elsewhere'));
-    assert.equal(screen.queryByText('Menu item'), null);
+    assert.ok(!screen.queryByText('Menu item'));
   });
 
   it('ignores a pointer-down on its own contents', () => {
@@ -67,14 +67,14 @@ describe('Dropdown', () => {
     fireEvent.mouseDown(trigger);
     assert.ok(screen.getByText('Menu item'));
     fireEvent.click(trigger);
-    assert.equal(screen.queryByText('Menu item'), null);
+    assert.ok(!screen.queryByText('Menu item'));
   });
 
   it('closes on Escape', () => {
     render(<Menu label="Menu" />);
     fireEvent.click(screen.getByText('Menu'));
     fireEvent.keyDown(document, { key: 'Escape' });
-    assert.equal(screen.queryByText('Menu item'), null);
+    assert.ok(!screen.queryByText('Menu item'));
   });
 
   it('lets Escape close only the innermost panel', () => {
@@ -91,7 +91,7 @@ describe('Dropdown', () => {
     assert.ok(screen.getByText('Inner item'));
 
     fireEvent.keyDown(document, { key: 'Escape' });
-    assert.equal(screen.queryByText('Inner item'), null);
+    assert.ok(!screen.queryByText('Inner item'));
     assert.equal(outerClosed.mock.calls.length, 0);
     assert.ok(screen.getByText('Inner'));
 
@@ -107,7 +107,7 @@ describe('Dropdown', () => {
     // A leaked document listener would keep calling onClose from here on.
     fireEvent.keyDown(document, { key: 'Escape' });
     fireEvent.mouseDown(document.body);
-    assert.equal(screen.queryByText('Menu item'), null);
+    assert.ok(!screen.queryByText('Menu item'));
   });
 
   it('takes an alignment class so it can open leftwards', () => {
