@@ -30,10 +30,11 @@ var version = "dev"
 
 const querierPrefix = "/querier.v1.QuerierService/"
 
-// The querier RPCs the UI calls, and nothing else — what the browser can
-// reach upstream is a decision here, not a side effect of whatever the
-// Pyroscope server happens to expose. Adding a call in src/api/client.ts
-// means adding it here.
+// The querier RPCs the UI calls, and nothing else. Each one is registered as
+// its own route below, so what the browser can reach upstream is a decision
+// stated here rather than a side effect of whatever the Pyroscope server
+// happens to expose. Adding a call in src/api/client.ts means adding it here
+// too — that coupling is the point.
 //
 // This replaced a pair of path prefixes. "/pyroscope/*" was one of them and
 // the UI has never called it, but a real Pyroscope serves its legacy HTTP API
@@ -41,17 +42,17 @@ const querierPrefix = "/querier.v1.QuerierService/"
 // read-only viewer into a write path: anything that could reach this binary
 // could store profiles under any tenant. Verified by ingesting through the
 // proxy and reading the service back out of Pyroscope.
-//
-// Matching the method exactly also settles path traversal for free: an
-// encoded "%2e%2e%2f" decodes into the method name and simply fails to match.
-var proxyMethods = map[string]bool{
-	"Diff":                   true,
-	"LabelNames":             true,
-	"LabelValues":            true,
-	"SelectMergeStacktraces": true,
-	"SelectSeries":           true,
-	"Series":                 true,
+var querierMethods = []string{
+	"Diff",
+	"LabelNames",
+	"LabelValues",
+	"SelectMergeStacktraces",
+	"SelectSeries",
+	"Series",
 }
+
+// Connect-JSON is POST-only, and the client sends nothing else.
+const maxRequestBody = 16 << 20
 
 // How long a termination signal waits for in-flight queries. Long enough for
 // a normal merge to finish, short enough to stay inside a container runtime's
@@ -121,18 +122,24 @@ func newHandler(dist fs.FS, index []byte, proxy http.Handler) http.Handler {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintln(w, "ok")
 	})
+
+	// One route per RPC, method included, so the mux does the matching: a verb
+	// the client never sends is a 405 and an RPC the UI does not call is a 404,
+	// both before anything reaches the proxy. Exact paths also settle path
+	// traversal — an encoded "%2e%2e%2f" decodes into the method name and
+	// matches no route.
+	forward := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+		proxy.ServeHTTP(w, r)
+	})
+	for _, method := range querierMethods {
+		mux.Handle("POST "+querierPrefix+method, forward)
+	}
+	// Anything else under the service prefix is an API path, so answer like
+	// one instead of falling through to the SPA shell.
+	mux.HandleFunc(querierPrefix, http.NotFound)
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if method, ok := strings.CutPrefix(r.URL.Path, querierPrefix); ok {
-			if !proxyMethods[method] {
-				// An API path, so say so rather than handing back the SPA
-				// shell the fallback below would produce.
-				http.NotFound(w, r)
-				return
-			}
-			r.Body = http.MaxBytesReader(w, r.Body, 16<<20)
-			proxy.ServeHTTP(w, r)
-			return
-		}
 		// Serve real files as-is; anything unknown falls back to the SPA
 		// shell so history-based routes (/comparison, /diff, ...) deep-link.
 		path := strings.TrimPrefix(r.URL.Path, "/")
