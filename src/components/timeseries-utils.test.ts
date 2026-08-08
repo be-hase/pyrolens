@@ -291,4 +291,28 @@ describe('axisTicks', () => {
   it('returns nothing when no round step fits', () => {
     assert.deepEqual(axisTicks(1_001, 500, 5_000), []);
   });
+
+  // formatTickTime labels ticks with local getters, so the snapping has to
+  // be local too: an epoch-aligned day tick sits at 09:00 in UTC+9 while its
+  // label claims midnight. These hold in whatever zone the tests run in.
+  it('lands day-step ticks on local midnight', () => {
+    const start = new Date(2026, 7, 1, 13, 30).getTime();
+    const ticks = axisTicks(start, 7 * 86_400_000, 86_400_000);
+    assert.ok(ticks.length > 0);
+    for (const ts of ticks) {
+      const d = new Date(ts);
+      assert.deepEqual(
+        [d.getHours(), d.getMinutes(), d.getSeconds()],
+        [0, 0, 0],
+        new Date(ts).toString(),
+      );
+    }
+  });
+
+  it('lands hour-step ticks on local whole hours', () => {
+    const start = new Date(2026, 7, 7, 5, 17).getTime();
+    for (const ts of axisTicks(start, 6 * 3_600_000, 3_600_000)) {
+      assert.equal(new Date(ts).getMinutes(), 0, new Date(ts).toString());
+    }
+  });
 });

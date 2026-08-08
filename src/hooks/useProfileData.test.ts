@@ -1,16 +1,26 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it, vi } from 'vitest';
-import { fetchFlamegraph, fetchTimeline } from '@api/client';
-import { useFlamegraph, useTimeline } from './useProfileData.ts';
+import {
+  fetchDiffFlamegraph,
+  fetchFlamegraph,
+  fetchTimeline,
+} from '@api/client';
+import {
+  useDiffFlamegraph,
+  useFlamegraph,
+  useTimeline,
+} from './useProfileData.ts';
 
 vi.mock('@api/client', () => ({
+  fetchDiffFlamegraph: vi.fn(),
   fetchFlamegraph: vi.fn(),
   fetchTimeline: vi.fn(),
 }));
 
 const flamegraphOf = vi.mocked(fetchFlamegraph);
 const timelineOf = vi.mocked(fetchTimeline);
+const diffOf = vi.mocked(fetchDiffFlamegraph);
 
 const CPU = 'process_cpu:cpu:nanoseconds:cpu:nanoseconds';
 const QUERY = `{service_name="web", profile_type="${CPU}"}`;
@@ -33,6 +43,7 @@ function deferred<T>() {
 beforeEach(() => {
   flamegraphOf.mockResolvedValue(profile('total'));
   timelineOf.mockResolvedValue([{ timestamp: 1_000_000, value: 1 }]);
+  diffOf.mockResolvedValue({ names: ['total'], levels: [] });
 });
 
 describe('useFlamegraph', () => {
@@ -260,5 +271,75 @@ describe('useTimeline', () => {
       await first.promise;
     });
     assert.deepEqual(result.current.timeline, [{ timestamp: 2, value: 2 }]);
+  });
+});
+
+describe('useDiffFlamegraph', () => {
+  const LEFT_RANGE = { start: 1_000_000, end: 2_000_000 };
+  const RIGHT_RANGE = { start: 2_000_000, end: 3_000_000 };
+
+  it('fetches both panes split and ranged', async () => {
+    const { result } = renderHook(() =>
+      useDiffFlamegraph({
+        leftQuery: QUERY,
+        rightQuery: OTHER,
+        leftRange: LEFT_RANGE,
+        rightRange: RIGHT_RANGE,
+      }),
+    );
+    await waitFor(() => assert.equal(diffOf.mock.calls.length, 1));
+    const [left, right, signal] = diffOf.mock.calls[0];
+    assert.deepEqual(left, {
+      profileTypeID: CPU,
+      labelSelector: '{service_name="web"}',
+      start: LEFT_RANGE.start,
+      end: LEFT_RANGE.end,
+    });
+    assert.deepEqual(right, {
+      profileTypeID: CPU,
+      labelSelector: '{service_name="api"}',
+      start: RIGHT_RANGE.start,
+      end: RIGHT_RANGE.end,
+    });
+    assert.ok(signal instanceof AbortSignal);
+    await waitFor(() =>
+      assert.deepEqual(result.current.diff?.names, ['total']),
+    );
+  });
+
+  it('explains a malformed pane query instead of fetching', () => {
+    // The Single view explains a broken selector; the Diff view showing
+    // nothing at all for the same typo was the inconsistency.
+    const { result } = renderHook(() =>
+      useDiffFlamegraph({
+        leftQuery: QUERY,
+        rightQuery: '{unclosed="a"',
+        leftRange: LEFT_RANGE,
+        rightRange: RIGHT_RANGE,
+      }),
+    );
+    assert.match(result.current.error ?? '', /Could not parse the query/);
+    assert.equal(result.current.loading, false);
+    assert.equal(diffOf.mock.calls.length, 0);
+  });
+
+  it('drops the error as soon as a pane has nothing to fetch', async () => {
+    diffOf.mockRejectedValueOnce(new Error('deadline exceeded'));
+    const { result, rerender } = renderHook(
+      ({ rightQuery }) =>
+        useDiffFlamegraph({
+          leftQuery: QUERY,
+          rightQuery,
+          leftRange: LEFT_RANGE,
+          rightRange: RIGHT_RANGE,
+        }),
+      { initialProps: { rightQuery: OTHER } },
+    );
+    await waitFor(() =>
+      assert.equal(result.current.error, 'deadline exceeded'),
+    );
+    rerender({ rightQuery: '{service_name="api"}' });
+    assert.equal(result.current.error, null);
+    assert.equal(result.current.loading, false);
   });
 });

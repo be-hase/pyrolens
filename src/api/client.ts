@@ -20,10 +20,6 @@ export function setTenant(tenant: string | undefined): void {
   currentTenant = tenant || undefined;
 }
 
-export function getTenant(): string | undefined {
-  return currentTenant;
-}
-
 /**
  * Probes whether the backing Pyroscope requires a tenant. Sends a LabelNames
  * request with an explicitly empty `X-Scope-OrgID`: HTTP 200 means
@@ -292,13 +288,14 @@ export interface GroupedTimeline {
 
 /**
  * One timeline per value of the `groupBy` label, ordered by total (sum of
- * point values) descending and truncated to `limit` when given.
+ * point values) descending. Not truncated: callers slice for display, so
+ * shares computed over the result cover every group.
  */
 export async function fetchGroupedTimelines(
-  params: ProfileQuery & { step: number; groupBy: string; limit?: number },
+  params: ProfileQuery & { step: number; groupBy: string },
   signal?: AbortSignal,
 ): Promise<GroupedTimeline[]> {
-  const { groupBy, limit, ...rest } = params;
+  const { groupBy, ...rest } = params;
   const res = await rpc<{ series?: WireSeries[] }>(
     'SelectSeries',
     { ...rest, groupBy: [groupBy] },
@@ -318,7 +315,7 @@ export async function fetchGroupedTimelines(
     merged.set(labelValue, bucket);
   }
   const sum = (points: Point[]) => points.reduce((acc, p) => acc + p.value, 0);
-  const grouped = [...merged]
+  return [...merged]
     .map(([labelValue, bucket]) => ({
       labelValue,
       points: [...bucket]
@@ -326,7 +323,6 @@ export async function fetchGroupedTimelines(
         .sort((a, b) => a.timestamp - b.timestamp),
     }))
     .sort((a, b) => sum(b.points) - sum(a.points));
-  return limit === undefined ? grouped : grouped.slice(0, limit);
 }
 
 // --- Labels ------------------------------------------------------------------

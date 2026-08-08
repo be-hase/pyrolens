@@ -34,6 +34,7 @@ export function ComparisonView({
   servicesLoading,
   query,
   from,
+  until,
   range,
   tenantID,
 }: ViewProps) {
@@ -41,7 +42,14 @@ export function ComparisonView({
 
   return (
     <div className="app-content">
-      <ControlsBar services={services} servicesLoading={servicesLoading} />
+      <ControlsBar
+        services={services}
+        servicesLoading={servicesLoading}
+        query={query}
+        from={from}
+        until={until}
+        range={range}
+      />
       <div className="comparison-grid">
         <ComparisonPane
           title="Baseline"

@@ -100,7 +100,7 @@ yarn install
 yarn dev                       # vite dev server on :5173, proxies to localhost:4040
 PYROSCOPE_URL=http://host:4040 yarn dev
 
-yarn test                      # unit tests (node:test)
+yarn test                      # unit tests (vitest)
 yarn lint && yarn type-check
 ```
 

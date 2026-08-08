@@ -44,9 +44,20 @@ function invalid(value: number): DisplayValue | undefined {
     return { text: '', numeric: Number.NaN, suffix: '' };
   }
   if (!Number.isFinite(value)) {
-    return { text: value.toLocaleString(), numeric: value, suffix: '' };
+    // Not toLocaleString: the browser locale must not leak into the UI.
+    return { text: String(value), numeric: value, suffix: '' };
   }
   return undefined;
+}
+
+/**
+ * "1234567" → "1,234,567" with a fixed separator — the sample counts in the
+ * tooltip must not follow the browser locale (the app is English throughout).
+ */
+export function groupThousands(value: number): string {
+  const [int, frac] = String(value).split('.');
+  const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return frac === undefined ? grouped : `${grouped}.${frac}`;
 }
 
 /**

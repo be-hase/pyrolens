@@ -16,7 +16,12 @@ import { NavBar } from '@components/NavBar';
 import { TenantDialog } from '@components/TenantDialog';
 import { useServices } from '@hooks/useServices';
 import { buildQuery } from './queryLang';
-import { resolveRange, type TimeRange } from './time';
+import {
+  DEFAULT_FROM,
+  DEFAULT_UNTIL,
+  resolveRange,
+  type TimeRange,
+} from './time';
 import { navigate, useRoute } from './urlState';
 import { ComparisonView } from './views/ComparisonView';
 import { DiffView } from './views/DiffView';
@@ -159,8 +164,8 @@ export function App() {
     status === 'multi' && ((!tenant && !storedTenant) || changingTenant);
 
   const query = params.get('query') ?? '';
-  const from = params.get('from') ?? 'now-1h';
-  const until = params.get('until') ?? 'now';
+  const from = params.get('from') ?? DEFAULT_FROM;
+  const until = params.get('until') ?? DEFAULT_UNTIL;
   // Memoized so the resolved range object only moves on URL change.
   const nowMs = useSyncExternalStore(subscribeNow, nowSnapshot);
   const range = useMemo(

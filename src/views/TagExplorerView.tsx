@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { ViewProps } from '../App';
 import { ControlsBar } from '@components/ControlsBar';
 import { MultiTimeSeries, type NamedSeries } from '@components/MultiTimeSeries';
@@ -10,13 +10,25 @@ import {
   fetchLabelNames,
   profileTypeUnit,
 } from '@api/client';
-import { splitQuery, toInternalLabel, upsertMatcher } from '../queryLang';
+import { useFetched } from '@hooks/useFetched';
+import { MALFORMED_MESSAGE } from '@hooks/useProfileData';
+import {
+  isMalformedQuery,
+  splitQuery,
+  toInternalLabel,
+  upsertMatcher,
+} from '../queryLang';
 import { timelineStep } from '../time';
 import { formatCell, groupByLabels, summarize } from './tagExplorerData';
 import { navigate, useRoute } from '../urlState';
 import './TagExplorerView.css';
 
 const MAX_SERIES = 8;
+
+// The client synthesizes this for series missing the group-by label; as a
+// matcher it has to become `label=""`, which is how the selector says
+// "no such label" — the literal string would match nothing.
+const NONE_LABEL = '(none)';
 
 // Break down a profile by one label: a timeline per label value plus a table
 // with totals. Rows link into Single / Comparison / Diff with the matcher
@@ -25,6 +37,8 @@ export function TagExplorerView({
   services,
   servicesLoading,
   query,
+  from,
+  until,
   range,
   tenantID,
 }: ViewProps) {
@@ -33,90 +47,71 @@ export function TagExplorerView({
   const { params } = useRoute();
   const groupBy = params.get('groupBy') ?? '';
 
-  const [labels, setLabels] = useState<string[]>([]);
-  const [series, setSeries] = useState<NamedSeries[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [labelsError, setLabelsError] = useState<string | null>(null);
-  const [fetching, setFetching] = useState(false);
-
-  // Derived so an aborted run can't leave the spinner stuck on.
-  const active = !!profileTypeID && !!groupBy;
-  const loading = active && fetching;
-
   // Available grouping labels for the current query.
-  useEffect(() => {
-    if (!profileTypeID) return;
-    const controller = new AbortController();
-    fetchLabelNames([labelSelector], range.start, range.end, controller.signal)
-      .then((names) => {
-        if (!controller.signal.aborted) {
-          setLabels(groupByLabels(names));
-          setLabelsError(null);
-        }
-      })
-      .catch((e: unknown) => {
-        if (!controller.signal.aborted)
-          setLabelsError(e instanceof Error ? e.message : String(e));
-      });
-    return () => controller.abort();
-  }, [profileTypeID, labelSelector, range.start, range.end, tenantID]);
+  const labels = useFetched<string[]>(
+    [],
+    !!profileTypeID,
+    (signal) =>
+      fetchLabelNames([labelSelector], range.start, range.end, signal).then(
+        groupByLabels,
+      ),
+    [labelSelector, range.start, range.end, tenantID],
+  );
 
   // Pick a default grouping label once labels arrive.
   useEffect(() => {
-    if (groupBy || labels.length === 0) return;
-    navigate({ set: { groupBy: labels[0] }, replace: true });
-  }, [groupBy, labels]);
+    if (groupBy || labels.data.length === 0) return;
+    navigate({ set: { groupBy: labels.data[0] }, replace: true });
+  }, [groupBy, labels.data]);
 
-  useEffect(() => {
-    if (!active) return;
-    const controller = new AbortController();
+  const active = !!profileTypeID && !!groupBy;
+  const grouped = useFetched(
+    [] as { labelValue: string; points: NamedSeries['points'] }[],
+    active,
+    (signal) =>
+      fetchGroupedTimelines(
+        {
+          profileTypeID,
+          labelSelector,
+          start: range.start,
+          end: range.end,
+          step: timelineStep(range),
+          groupBy: toInternalLabel(groupBy),
+        },
+        signal,
+      ),
+    [profileTypeID, labelSelector, groupBy, range.start, range.end, tenantID],
+  );
+  const loading = active && grouped.fetching;
+  const error = isMalformedQuery(query)
+    ? MALFORMED_MESSAGE
+    : ((active ? grouped.fetchError : null) ??
+      (profileTypeID ? labels.fetchError : null));
 
-    async function load() {
-      setFetching(true);
-      try {
-        const grouped = await fetchGroupedTimelines(
-          {
-            profileTypeID,
-            labelSelector,
-            start: range.start,
-            end: range.end,
-            step: timelineStep(range),
-            groupBy: toInternalLabel(groupBy),
-            limit: MAX_SERIES,
-          },
-          controller.signal,
-        );
-        if (controller.signal.aborted) return;
-        setSeries(
-          grouped.map((g) => ({ label: g.labelValue, points: g.points })),
-        );
-        setError(null);
-      } catch (e: unknown) {
-        if (controller.signal.aborted) return;
-        setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        if (!controller.signal.aborted) setFetching(false);
-      }
-    }
-    load();
-
-    return () => controller.abort();
-  }, [active, profileTypeID, labelSelector, groupBy, range, tenantID]);
-
-  const rows = useMemo(() => summarize(series), [series]);
+  const allSeries = useMemo(
+    () => grouped.data.map((g) => ({ label: g.labelValue, points: g.points })),
+    [grouped.data],
+  );
+  // Shares are computed across every group; only the top slice is drawn and
+  // listed, or the percentages would be rebased to the visible rows.
+  const allRows = useMemo(() => summarize(allSeries), [allSeries]);
+  const series = allSeries.slice(0, MAX_SERIES);
+  const rows = allRows.slice(0, MAX_SERIES);
 
   const unit = profileTypeUnit(profileTypeID);
   const fmt = (v: number) => formatCell(v, unit);
 
+  const matcherValue = (label: string) => (label === NONE_LABEL ? '' : label);
+
   const selectRow = (value: string) => {
     navigate({
       path: '/',
-      set: { query: upsertMatcher(query, groupBy, value) },
+      set: { query: upsertMatcher(query, groupBy, matcherValue(value)) },
     });
   };
 
   const compareRow = (value: string, target: '/comparison' | '/diff') => {
-    const withMatcher = upsertMatcher(query, groupBy, value);
+    const withMatcher = upsertMatcher(query, groupBy, matcherValue(value));
     navigate({
       path: target,
       // Clear any pane ranges brushed on a previous visit, so the panes
@@ -134,12 +129,19 @@ export function TagExplorerView({
 
   return (
     <div className="app-content">
-      <ControlsBar services={services} servicesLoading={servicesLoading} />
+      <ControlsBar
+        services={services}
+        servicesLoading={servicesLoading}
+        query={query}
+        from={from}
+        until={until}
+        range={range}
+      />
 
-      {labels.length > 0 && (
+      {labels.data.length > 0 && (
         <div className="tag-explorer-labels">
           <span className="tag-explorer-labels-title">Group by</span>
-          {labels.map((label) => (
+          {labels.data.map((label) => (
             <button
               key={label}
               type="button"
@@ -152,17 +154,15 @@ export function TagExplorerView({
         </div>
       )}
 
-      {(error ?? labelsError) && (
-        <div className="app-error">{error ?? labelsError}</div>
-      )}
+      {error && <div className="app-error">{error}</div>}
 
       <Panel
         title={groupBy ? `Timeline by ${groupBy}` : 'Timeline'}
         meta={
           loading
             ? 'Loading…'
-            : series.length === MAX_SERIES
-              ? `top ${MAX_SERIES} series`
+            : allRows.length > MAX_SERIES
+              ? `top ${MAX_SERIES} of ${allRows.length} series`
               : undefined
         }
       >
@@ -190,17 +190,14 @@ export function TagExplorerView({
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {rows.map((row, i) => (
                 <tr key={row.label}>
                   <td className="tag-explorer-chip-cell">
+                    {/* Rows and series come from the same ranking, so the
+                        row's position is its palette slot in the chart. */}
                     <span
                       className="multi-timeseries-chip"
-                      style={{
-                        background:
-                          SERIES_COLORS[
-                            series.findIndex((s) => s.label === row.label)
-                          ],
-                      }}
+                      style={{ background: SERIES_COLORS[i] }}
                     />
                   </td>
                   <td className="tag-explorer-value-cell">

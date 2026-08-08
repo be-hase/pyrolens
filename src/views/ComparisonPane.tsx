@@ -4,7 +4,7 @@ import { TimeSeries } from '@components/TimeSeries';
 import { useTimeline } from '@hooks/useProfileData';
 import { useEditBuffer } from '@hooks/useEditBuffer';
 import { splitQuery } from '../queryLang';
-import { formatRangeLabel, type TimeRange } from '../time';
+import { formatAbsoluteRange, type TimeRange } from '../time';
 import { navigate } from '../urlState';
 import type { PaneParams } from './comparisonParams';
 
@@ -36,10 +36,7 @@ export function ComparisonPane({
   const [draft, setDraft] = useEditBuffer(pane.query);
 
   return (
-    <Panel
-      title={title}
-      meta={formatRangeLabel(String(pane.range.start), String(pane.range.end))}
-    >
+    <Panel title={title} meta={formatAbsoluteRange(pane.range)}>
       <div className="comparison-pane">
         <QueryBar
           query={draft}

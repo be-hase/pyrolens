@@ -30,7 +30,14 @@ export function SingleView({
 
   return (
     <div className="app-content">
-      <ControlsBar services={services} servicesLoading={servicesLoading} />
+      <ControlsBar
+        services={services}
+        servicesLoading={servicesLoading}
+        query={query}
+        from={from}
+        until={until}
+        range={range}
+      />
 
       <QueryBar
         query={draft}
@@ -46,7 +53,7 @@ export function SingleView({
 
       <Panel
         title="Timeline"
-        meta={tl.loading ? 'Loading…' : formatRangeLabel(from, until)}
+        meta={tl.loading ? 'Loading…' : formatRangeLabel(from, until, range)}
       >
         <TimeSeries
           data={tl.timeline}

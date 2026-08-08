@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"errors"
 	"flag"
@@ -15,7 +16,9 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -96,9 +99,11 @@ func newHandler(dist fs.FS, index []byte, proxy http.Handler) http.Handler {
 				fileServer.ServeHTTP(w, r)
 				return
 			}
-			// A missing asset must 404, not masquerade as the SPA shell —
-			// stale HTML would otherwise load a text/html "script".
-			if strings.HasPrefix(path, "assets/") {
+			// A missing file must 404, not masquerade as the SPA shell —
+			// stale HTML would otherwise load as a text/html "script" (or a
+			// broken icon mask). View routes carry no extension, so a dot in
+			// the last segment marks a file request.
+			if last := path[strings.LastIndex(path, "/")+1:]; strings.Contains(last, ".") {
 				http.NotFound(w, r)
 				return
 			}
@@ -144,5 +149,21 @@ func main() {
 		IdleTimeout:       2 * time.Minute,
 	}
 	log.Printf("pyrolens listening on %s, proxying to %s", *listen, target.Redacted())
-	log.Fatal(server.ListenAndServe())
+	errc := make(chan error, 1)
+	go func() { errc <- server.ListenAndServe() }()
+
+	// The binary runs as PID 1 in the container, so it handles termination
+	// itself: finish in-flight queries instead of dropping them mid-response.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	select {
+	case err := <-errc:
+		log.Fatal(err)
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("shutdown: %v", err)
+		}
+	}
 }

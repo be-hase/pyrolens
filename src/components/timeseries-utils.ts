@@ -3,7 +3,7 @@
 // profile type's native unit: nanoseconds for 'ns' profiles, plain bytes
 // and counts otherwise.
 
-const MONTH_ABBR = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ');
+import { formatMonthDay } from '../time';
 
 const SECOND = 1_000;
 const MINUTE = 60 * SECOND;
@@ -93,8 +93,7 @@ const pad2 = (n: number) => String(n).padStart(2, '0');
 export function formatTickTime(tsMs: number, stepMs: number): string {
   const d = new Date(tsMs);
   if (stepMs >= DAY) {
-    // Fixed English month names, so ticks don't follow the browser locale.
-    return `${MONTH_ABBR[d.getMonth()]} ${d.getDate()}`;
+    return formatMonthDay(tsMs);
   }
   const hhmm = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
   return stepMs < MINUTE ? `${hhmm}:${pad2(d.getSeconds())}` : hhmm;
@@ -165,6 +164,11 @@ export function fractionToY(frac: number, box: PlotBox): number {
 /**
  * Round tick timestamps covering the range, at `stepMs` apart — which must be
  * positive, as `tickStepMs` guarantees.
+ *
+ * Snapped to *local* wall-clock boundaries, because `formatTickTime` labels
+ * them with local getters: an epoch-aligned day tick sits at 09:00 in UTC+9
+ * while its label claims local midnight (and half-hour zones misalign every
+ * hourly tick the same way).
  */
 export function axisTicks(
   startMs: number,
@@ -173,7 +177,9 @@ export function axisTicks(
 ): number[] {
   const out: number[] = [];
   const end = startMs + durationMs;
-  for (let ts = Math.ceil(startMs / stepMs) * stepMs; ts <= end; ts += stepMs) {
+  const offsetMs = new Date(startMs).getTimezoneOffset() * 60_000;
+  const first = Math.ceil((startMs - offsetMs) / stepMs) * stepMs + offsetMs;
+  for (let ts = first; ts <= end; ts += stepMs) {
     out.push(ts);
   }
   return out;

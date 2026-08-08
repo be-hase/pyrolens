@@ -10,6 +10,11 @@ const UNIT_MS: Record<string, number> = {
   w: 604_800_000,
 };
 
+// The default main window, written once: App resolves it and the controls
+// display it, and the two must never disagree.
+export const DEFAULT_FROM = 'now-1h';
+export const DEFAULT_UNTIL = 'now';
+
 export function isRelative(value: string): boolean {
   return value === 'now' || /^now-\d+[smhdw]$/.test(value);
 }
@@ -26,9 +31,11 @@ export function resolveTime(
   if (rel) return nowMs - parseInt(rel[1], 10) * (UNIT_MS[rel[2]] ?? 60_000);
   const abs = Number(value);
   if (Number.isFinite(abs) && abs > 0) {
-    // Accept unix seconds too (classic UI used them); anything before ~2001
-    // in ms is assumed to be seconds.
-    return abs < 1_000_000_000_000 ? abs * 1000 : abs;
+    // Accept unix seconds too (classic UI used them): a value that stays
+    // before ~2100 as seconds is seconds. Larger values are milliseconds —
+    // including pre-2001 dates from the range picker, which a blanket
+    // "small means seconds" rule would fling ~29000 years into the future.
+    return abs < 4_102_444_800 ? abs * 1000 : abs;
   }
   return fallback;
 }
@@ -69,15 +76,8 @@ export function resolveRange(
   return start < end ? { start, end } : { start: end - 3_600_000, end };
 }
 
-export function formatRangeLabel(
-  from: string | null | undefined,
-  until: string | null | undefined,
-): string {
-  if ((!until || until === 'now') && (!from || isRelative(from))) {
-    const rel = !from || from === 'now' ? '1h' : from.slice(4);
-    return `Last ${rel}`;
-  }
-  const { start, end } = resolveRange(from, until, Date.now());
+/** "Aug 7 09:30 – Aug 7 10:30" for an already-resolved range. */
+export function formatAbsoluteRange({ start, end }: TimeRange): string {
   const fmt = (ms: number) => {
     const d = new Date(ms);
     const time = `${String(d.getHours()).padStart(2, '0')}:${String(
@@ -86,6 +86,23 @@ export function formatRangeLabel(
     return `${formatMonthDay(ms)} ${time}`;
   };
   return `${fmt(start)} – ${fmt(end)}`;
+}
+
+/**
+ * Label for the main range button. Takes the range App already resolved
+ * rather than resolving again: calling `Date.now()` here would run during
+ * render and drift away from the frozen "now" the data was fetched with.
+ */
+export function formatRangeLabel(
+  from: string | null | undefined,
+  until: string | null | undefined,
+  range: TimeRange,
+): string {
+  if ((!until || until === 'now') && (!from || isRelative(from))) {
+    const rel = !from || from === 'now' ? '1h' : from.slice(4);
+    return `Last ${rel}`;
+  }
+  return formatAbsoluteRange(range);
 }
 
 /** Step for timeline queries: ~100 points across the range, min 15s. */

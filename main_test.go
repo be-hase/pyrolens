@@ -134,17 +134,24 @@ func TestHashedAssetsAreImmutable(t *testing.T) {
 	}
 }
 
-func TestMissingAssetIsNotFound(t *testing.T) {
+func TestMissingFileIsNotFound(t *testing.T) {
 	h, _ := newTestHandler()
-	rec := get(t, h, "/assets/index-stale.js")
 	// Falling back to the shell here would hand the browser HTML with a
 	// script's content type, and the page would fail in a way that looks
-	// like a bad deploy rather than a stale cache.
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status: got %d, want 404", rec.Code)
-	}
-	if strings.Contains(rec.Body.String(), "<title>pyrolens</title>") {
-		t.Error("a missing asset was served the SPA shell")
+	// like a bad deploy rather than a stale cache. Same for a mistyped icon:
+	// its CSS mask would silently load HTML instead of failing visibly.
+	for _, path := range []string{
+		"/assets/index-stale.js",
+		"/icons/typo.svg",
+		"/missing.svg",
+	} {
+		rec := get(t, h, path)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s: status got %d, want 404", path, rec.Code)
+		}
+		if strings.Contains(rec.Body.String(), "<title>pyrolens</title>") {
+			t.Errorf("%s: a missing file was served the SPA shell", path)
+		}
 	}
 }
 

@@ -26,7 +26,9 @@ describe('TenantDialog', () => {
   it('starts from the remembered tenant and focuses the field', () => {
     const { input } = setup('team-a');
     assert.equal((input as HTMLInputElement).value, 'team-a');
-    assert.equal(document.activeElement, input);
+    // assert.ok, not assert.equal: on failure node:assert would try to diff
+    // two live jsdom nodes and walk the whole document graph (AGENTS.md).
+    assert.ok(document.activeElement === input);
   });
 
   it('submits what was typed', async () => {
@@ -64,10 +66,10 @@ describe('TenantDialog', () => {
     const { user, input, submit } = setup('team-a');
     input.focus();
     await user.tab();
-    assert.equal(document.activeElement, submit);
+    assert.ok(document.activeElement === submit);
     await user.tab();
-    assert.equal(document.activeElement, input);
+    assert.ok(document.activeElement === input);
     await user.tab({ shift: true });
-    assert.equal(document.activeElement, submit);
+    assert.ok(document.activeElement === submit);
   });
 });

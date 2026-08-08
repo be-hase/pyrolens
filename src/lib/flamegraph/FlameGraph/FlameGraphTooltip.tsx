@@ -1,6 +1,7 @@
 import {
   type DisplayValue,
   getValueFormat,
+  groupThousands,
   type ValueFormatter,
 } from '../format';
 import { Portal } from '../ui/Portal';
@@ -138,7 +139,7 @@ export const getTooltipData = (
     unitTitle,
     unitValue,
     unitSelf,
-    samples: displayValue.numeric.toLocaleString(),
+    samples: groupThousands(displayValue.numeric),
   };
 };
 

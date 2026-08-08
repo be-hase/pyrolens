@@ -19,7 +19,11 @@ function basePath(): string {
 function currentPath(): string {
   const prefix = basePath();
   let path = window.location.pathname;
-  if (prefix && path.startsWith(prefix)) path = path.slice(prefix.length);
+  // Segment-boundary match: under a base of /lens, /lenses/... is not ours
+  // and must not be sliced into the non-route "es/...".
+  if (prefix && (path === prefix || path.startsWith(`${prefix}/`))) {
+    path = path.slice(prefix.length);
+  }
   return path === '' ? '/' : path;
 }
 
