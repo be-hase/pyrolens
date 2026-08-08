@@ -230,7 +230,10 @@ export function upsertMatcher(
   // A label arriving from a URL param or from server data could otherwise
   // inject extra matchers into the selector.
   if (!isValidLabelName(label)) return query;
-  const matchers = parseMatchers(query) ?? [];
+  const matchers = parseMatchers(query);
+  // An unparseable query is left alone, like a bad label above: rebuilding
+  // from nothing would silently discard every matcher the user had.
+  if (matchers === null) return query;
   const next: Matcher[] = [];
   let replaced = false;
   for (const m of matchers) {

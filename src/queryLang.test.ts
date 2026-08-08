@@ -336,6 +336,13 @@ describe('upsertMatcher', () => {
     assert.equal(upsertMatcher('{}', 'region', 'eu'), '{region="eu"}');
   });
 
+  it('leaves an unparseable query untouched', () => {
+    // Rebuilding from nothing would silently discard every matcher the user
+    // had — a drill-down click must not widen the query to the whole tenant.
+    const malformed = '{service_name="checkout", region=';
+    assert.equal(upsertMatcher(malformed, 'region', 'eu'), malformed);
+  });
+
   it('escapes special characters in the new value', () => {
     assert.equal(
       upsertMatcher('{}', 'note', 'say "hi"\\now'),
