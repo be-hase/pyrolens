@@ -9,7 +9,9 @@ import { defineConfig, globalIgnores } from 'eslint/config';
 export default defineConfig([
   // src/lib/flamegraph is vendored from grafana/grafana@v13.0.1; we strip it
   // down incrementally, so apply our project lint only to first-party code.
-  globalIgnores(['dist', 'src/lib/flamegraph/**']),
+  // dist and coverage are build output — the latter only exists after
+  // `yarn test:coverage`, so CI never sees it and only a local run trips on it.
+  globalIgnores(['dist', 'coverage', 'src/lib/flamegraph/**']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
