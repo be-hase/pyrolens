@@ -49,7 +49,7 @@
   font-family: inherit;
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
-  color: #fff;
+  color: var(--color-primary-contrast);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -88,9 +88,12 @@
   white-space: nowrap;
 }
 
+/* The row Enter is about to accept, in the fixed vocabulary for a selected
+   row — white on --color-primary is only 2.8:1, which made the one row the
+   user has to read the least readable one in the list. */
 .querybar-suggestion.active {
-  background: var(--color-primary);
-  color: #fff;
+  background: var(--action-selected);
+  color: var(--color-primary-text);
 }
 
 .querybar-run:disabled {

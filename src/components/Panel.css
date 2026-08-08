@@ -21,11 +21,7 @@
 .panel-meta {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  color: #585858;
-}
-
-[data-theme='light'] .panel-meta {
-  color: #9aa0bf;
+  color: var(--text-secondary);
 }
 
 .panel-body {

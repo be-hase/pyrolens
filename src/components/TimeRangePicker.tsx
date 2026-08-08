@@ -328,7 +328,13 @@ export function TimeRangePicker({
       >
         {formatRangeLabel(from, until, range)}
       </Button>
-      <Dropdown open={open} onClose={() => setOpen(false)} className="trp">
+      <Dropdown
+        open={open}
+        onClose={() => setOpen(false)}
+        className="trp"
+        role="dialog"
+        label="Time range"
+      >
         <div className="trp-absolute">
           <div className="trp-heading">Absolute range</div>
           <DateTimeField

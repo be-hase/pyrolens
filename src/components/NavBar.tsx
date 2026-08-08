@@ -40,6 +40,9 @@ export function NavBar({
           <a
             key={tab.id}
             className={`navbar-tab${tab.id === activeView ? ' active' : ''}`}
+            // Which view is open is otherwise carried by text colour alone,
+            // which says nothing to a screen reader.
+            aria-current={tab.id === activeView ? 'page' : undefined}
             href={buildUrl({ path: tab.path })}
             onClick={onLinkClick({ path: tab.path })}
           >
@@ -62,6 +65,7 @@ export function NavBar({
         value={theme}
         options={THEME_OPTIONS}
         align="right"
+        label="Theme"
         onChange={(v) => onThemeChange(v === 'light' ? 'light' : 'dark')}
       />
     </nav>

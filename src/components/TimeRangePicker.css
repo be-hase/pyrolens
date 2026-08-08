@@ -57,11 +57,11 @@
 }
 
 .trp-field input[aria-invalid='true'] {
-  border-color: #e5484d80;
+  border-color: var(--color-error-border);
 }
 
 .trp-field input[aria-invalid='true']:focus {
-  border-color: #e5484d;
+  border-color: var(--color-error-text);
 }
 
 /* Calendar trigger inside the field. */
@@ -149,7 +149,7 @@
 }
 
 .trp-day.dim {
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .trp-day.today {
@@ -157,8 +157,8 @@
 }
 
 .trp-day.selected {
-  background: var(--color-primary);
-  color: #fff;
+  background: var(--color-primary-strong);
+  color: var(--color-primary-contrast);
 }
 
 /* Live summary of the drafted range, or the validation error. */
@@ -169,7 +169,7 @@
 }
 
 .trp-hint-error {
-  color: #e5484d;
+  color: var(--color-error-text);
 }
 
 .trp-apply {

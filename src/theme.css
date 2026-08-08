@@ -31,6 +31,11 @@
   --color-primary-text: #fb923c;
   --color-primary-border: #fb923c;
 
+  /* Errors: the notice above a panel, and invalid form fields. */
+  --color-error-text: #e5484d;
+  --color-error-bg: #e5484d14;
+  --color-error-border: #e5484d59;
+
   /* Interaction states */
   --action-hover: #ffffff14;
   --action-selected: #f9731630;
@@ -106,6 +111,12 @@ html[data-theme='light'] {
   --action-selected: #ea580c1f;
   --action-focus: #ea580c80;
   --chart-selection: #4a77c9;
+
+  /* A step darker than the dark theme's red: the same value that reads
+     cleanly on #1a1d23 is under 4.5:1 on a near-white surface. */
+  --color-error-text: #c1272d;
+  --color-error-bg: #e5484d12;
+  --color-error-border: #e5484d4d;
 
   /* Light steps of the series palette */
   --series-1: #eb6834;
@@ -183,6 +194,10 @@ textarea:focus,
 select:focus {
   outline: none;
   border-color: var(--color-primary);
+  /* A ring as well as the border colour: an invalid field already overrides
+     its border with the error colour, so border alone leaves a keyboard user
+     unable to tell which of From/To they are typing into. */
+  box-shadow: 0 0 0 2px var(--action-focus);
 }
 
 input::placeholder,
