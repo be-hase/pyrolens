@@ -116,13 +116,16 @@ func newHandler(dist fs.FS, index []byte, proxy http.Handler) http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		for _, prefix := range proxyPrefixes {
 			if strings.HasPrefix(r.URL.Path, prefix) {
-				// These two prefixes are the only thing deciding what a
-				// browser may reach on the Pyroscope server, so the path they
-				// are matched against has to be canonical. ServeMux cleans the
-				// *escaped* path, so "%2e%2e%2f" survives it and arrives here
-				// decoded as real ".." segments — and the proxy forwards the
-				// original encoding, so an upstream that normalises would then
-				// serve whatever the traversal pointed at, allowlist bypassed.
+				// Belt and braces, not a fix for a live hole. ServeMux cleans
+				// the *escaped* path, so "%2e%2e%2f" survives it and arrives
+				// here decoded as real ".." segments, which a plain prefix
+				// test accepts; the proxy then forwards the original encoding.
+				// Measured against Pyroscope 2.2.1 that reaches nothing — its
+				// router normalises and answers 301 with a relative Location,
+				// so no body comes back and a POST is not re-issued. It would
+				// matter only behind a hop that normalises and serves instead
+				// (some ingress configurations), which is unverified. Cheap
+				// enough to just require a canonical path.
 				if !isCanonicalPath(r.URL.Path) {
 					http.Error(w, "bad request", http.StatusBadRequest)
 					return

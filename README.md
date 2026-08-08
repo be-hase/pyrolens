@@ -92,8 +92,7 @@ tenant by editing the address bar. Treat it as a convenience for people who
 are already allowed to see every tenant, not as a permission check.
 
 Only the two path prefixes above are proxied; anything else is served from
-the embedded UI. Requests carrying a non-canonical path are refused rather
-than forwarded, so the prefix allowlist cannot be walked out of.
+the embedded UI, and a proxied request has to carry a canonical path.
 
 ## URL parameters
 

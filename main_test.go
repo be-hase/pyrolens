@@ -214,9 +214,10 @@ func TestSecurityHeaders(t *testing.T) {
 func TestEncodedTraversalIsNotProxied(t *testing.T) {
 	// ServeMux cleans the escaped path, so a literal "/pyroscope/../admin" is
 	// redirected before the handler sees it — but "%2e%2e%2f" survives and
-	// decodes into r.URL.Path, passing a plain prefix check. The proxy would
-	// then forward the original encoding, and any upstream that normalises
-	// paths would serve whatever it pointed at, allowlist bypassed.
+	// decodes into r.URL.Path, passing a plain prefix check. Pyroscope itself
+	// answers such a request with a redirect and no body, so nothing leaked;
+	// this keeps the prefix test meaning what it says regardless of what sits
+	// upstream.
 	traversals := []string{
 		"/pyroscope/%2e%2e%2fadmin",
 		"/pyroscope/%2e%2e%2f",
