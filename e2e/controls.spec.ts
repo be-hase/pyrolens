@@ -1,18 +1,18 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
   clearUpstreamLog,
-  failOnPageErrors,
   meta,
   upstreamLog,
   url,
+  watchPageErrors,
 } from './helpers.ts';
 
 // Every control changes the screen by writing to the URL. These check that
 // the write happens and that a fetch follows it, which is the part a unit
 // test stubs out.
 
+watchPageErrors();
 test.beforeEach(async ({ page }) => {
-  failOnPageErrors(page);
   await clearUpstreamLog(page);
 });
 
@@ -41,14 +41,17 @@ test('Run puts the edited query in the URL and refetches', async ({ page }) => {
     .toBe(true);
 });
 
+// Scoped to the picker's own wrapper. Matching a button by the shape of its
+// label instead reached across the whole page and picked up whichever control
+// happened to come first in the DOM.
+const openRangePicker = (page: Page) =>
+  page.locator('.time-range-picker').getByRole('button').first().click();
+
 test('a time-range preset writes a relative from and drops until', async ({
   page,
 }) => {
   await page.goto(url('/'));
-  await page
-    .getByRole('button', { name: /\d{4}-|Last|:/ })
-    .first()
-    .click();
+  await openRangePicker(page);
   await page.getByText('Last 30 minutes').click();
 
   const params = new URL(page.url()).searchParams;
@@ -60,10 +63,7 @@ test('the range picker applies an absolute window as unix milliseconds', async (
   page,
 }) => {
   await page.goto(url('/'));
-  await page
-    .getByRole('button', { name: /\d{4}-|Last|:/ })
-    .first()
-    .click();
+  await openRangePicker(page);
 
   const from = page
     .locator('.trp-field')
@@ -119,9 +119,17 @@ test('the query bar suggests labels from the server', async ({ page }) => {
 
   const listbox = page.getByRole('listbox');
   await expect(listbox).toBeVisible();
-  // LabelNames, minus the dunder ones the UI hides.
+  // LabelNames, minus the dunder ones the UI hides. `__profile_type__` is
+  // the exception: it is offered, under the display name the query language
+  // uses. Asserting on the raw name instead would be unfalsifiable, since it
+  // is rewritten before it is ever rendered.
   await expect(listbox.getByRole('option', { name: 'region' })).toBeVisible();
-  await expect(listbox.getByText('__profile_type__')).toHaveCount(0);
+  await expect(
+    listbox.getByRole('option', { name: 'profile_type', exact: true }),
+  ).toBeVisible();
+  for (const internal of ['__name__', '__unit__', '__service_name__']) {
+    await expect(listbox.getByText(internal)).toHaveCount(0);
+  }
 
   await listbox.getByRole('option', { name: 'region' }).click();
   await expect(input).toHaveValue('{region=""');

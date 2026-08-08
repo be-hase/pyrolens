@@ -20,6 +20,7 @@ export function Select({
   icon,
   align = 'left',
   className,
+  label,
 }: {
   value: string;
   options: SelectOption[];
@@ -28,6 +29,12 @@ export function Select({
   icon?: IconType;
   align?: 'left' | 'right';
   className?: string;
+  /**
+   * Names the control. Without it the trigger's only text is the current
+   * value, so it announces as e.g. "Dark, collapsed" with nothing saying
+   * what it selects.
+   */
+  label?: string;
 }) {
   const [open, setOpen] = useState(false);
   const current = options.find((o) => o.value === value);
@@ -39,16 +46,29 @@ export function Select({
         iconRight="angle-down"
         aria-haspopup="listbox"
         aria-expanded={open}
+        // Both halves: the visible text is only the value, so a bare
+        // aria-label would trade "what it holds" for "what it is".
+        aria-label={label && `${label}: ${current?.label ?? value}`}
         onClick={() => setOpen((o) => !o)}
       >
         {current?.label ?? value}
       </Button>
-      <Dropdown open={open} onClose={() => setOpen(false)} align={align}>
+      <Dropdown
+        open={open}
+        onClose={() => setOpen(false)}
+        align={align}
+        role="listbox"
+        label={label}
+      >
         {options.map((o) => (
           <Fragment key={o.value}>
             {o.divider && <div className="dropdown-divider" />}
             <button
               type="button"
+              role="option"
+              // The selected option is otherwise signalled by background
+              // colour alone.
+              aria-selected={o.value === value}
               className={
                 o.value === value ? 'select-option active' : 'select-option'
               }

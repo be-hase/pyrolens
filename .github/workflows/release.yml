@@ -17,9 +17,14 @@ jobs:
       - name: verify the tag is semver
         env:
           TAG: ${{ github.ref_name }}
+        # Build metadata is deliberately NOT accepted: `+` is legal in semver
+        # but not in an OCI tag, and .goreleaser.yaml templates the version
+        # straight into one — so a `v1.0.0+build.1` passed this gate and then
+        # died in the release job, which is exactly what the gate exists to
+        # prevent.
         run: |
-          echo "$TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?(\+[0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*)?$' \
-            || { echo "tag $TAG is not strict semver (vX.Y.Z[-prerelease][+metadata])" >&2; exit 1; }
+          echo "$TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?$' \
+            || { echo "tag $TAG is not a releasable semver (vX.Y.Z[-prerelease]; build metadata is not usable as an image tag)" >&2; exit 1; }
 
   # Pushes to main run CI, but nothing otherwise guarantees the commit a tag
   # points at ever went through it. Runs after the cheap tag check so a

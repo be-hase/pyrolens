@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { failOnPageErrors, meta } from './helpers.ts';
+import { meta, watchPageErrors } from './helpers.ts';
 
 // Against a Pyroscope started without -auth.multitenancy-enabled, which the
 // dev stack also offers (`--profile single`). The probe is answered rather
@@ -16,7 +16,7 @@ const url = (path: string) => {
   return `${path}?${params}`;
 };
 
-test.beforeEach(({ page }) => failOnPageErrors(page));
+watchPageErrors();
 
 test('no tenant is asked for, and the view renders', async ({ page }) => {
   await page.goto(url('/'));

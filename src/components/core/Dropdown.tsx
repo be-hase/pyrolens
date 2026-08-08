@@ -16,12 +16,18 @@ export function Dropdown({
   onClose,
   align = 'left',
   className,
+  role,
+  label,
   children,
 }: {
   open: boolean;
   onClose: () => void;
   align?: 'left' | 'right';
   className?: string;
+  /** Matches the trigger's aria-haspopup, so the promise it makes is kept. */
+  role?: 'listbox' | 'menu' | 'dialog';
+  /** Accessible name, for the roles that need one. */
+  label?: string;
   children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -61,6 +67,8 @@ export function Dropdown({
     <div
       ref={ref}
       className={`dropdown dropdown-${align}${className ? ` ${className}` : ''}`}
+      role={role}
+      aria-label={label}
     >
       {children}
     </div>

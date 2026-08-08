@@ -91,21 +91,38 @@ function refresh(): boolean {
   return true;
 }
 
+// One observer for every subscriber. Per-subscriber observers each called
+// refresh(), and refresh() reports a change only once — so whichever
+// callback ran first repainted and all the others were never told, leaving
+// half the flame graph on the previous theme until something unrelated
+// re-rendered it.
+const listeners = new Set<() => void>();
+let observer: MutationObserver | undefined;
+
 function subscribe(onChange: () => void): () => void {
   // The attribute may have flipped between render and subscription; React
   // re-reads the snapshot right after subscribing, so refresh it here.
   refresh();
+  listeners.add(onChange);
 
-  const observer = new MutationObserver(() => {
-    if (refresh()) {
-      onChange();
+  if (!observer) {
+    observer = new MutationObserver(() => {
+      if (!refresh()) return;
+      for (const listener of [...listeners]) listener();
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+  }
+
+  return () => {
+    listeners.delete(onChange);
+    if (listeners.size === 0) {
+      observer?.disconnect();
+      observer = undefined;
     }
-  });
-  observer.observe(document.documentElement, {
-    attributes: true,
-    attributeFilter: ['data-theme'],
-  });
-  return () => observer.disconnect();
+  };
 }
 
 /**

@@ -1,16 +1,16 @@
 import { expect, test } from '@playwright/test';
 import {
   clearUpstreamLog,
-  failOnPageErrors,
   meta,
   upstreamLog,
+  watchPageErrors,
 } from './helpers.ts';
 
 // The fake upstream refuses an empty X-Scope-OrgID, exactly as a multitenant
 // Pyroscope does, so the whole tenancy flow runs for real here.
 
+watchPageErrors();
 test.beforeEach(async ({ page, context }) => {
-  failOnPageErrors(page);
   await context.clearCookies();
   await clearUpstreamLog(page);
 });
@@ -25,6 +25,13 @@ test('a multitenant server is asked for a tenant before anything is queried', as
 
   // Only the probe may have gone out, and it must have carried the empty
   // tenant that asks the question.
+  // Waited for, not sampled: a query fired under the wrong tenant may not
+  // have reached the fake yet. The count guard matters because every() is
+  // vacuously true on an empty log — without it this passes when the probe
+  // was never sent at all.
+  await expect
+    .poll(async () => (await upstreamLog(page)).length)
+    .toBeGreaterThan(0);
   const log = await upstreamLog(page);
   expect(log.every((entry) => entry.tenant === '')).toBe(true);
   expect(log.some((entry) => entry.method === 'SelectMergeStacktraces')).toBe(

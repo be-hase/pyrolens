@@ -315,4 +315,37 @@ describe('axisTicks', () => {
       assert.equal(new Date(ts).getMinutes(), 0, new Date(ts).toString());
     }
   });
+
+  it('keeps day ticks on local midnight across a DST transition', () => {
+    // A fixed offset taken at the start of the range walks every tick after
+    // the transition an hour off, which draws two gridlines labelled with the
+    // same date and none for the next day. Pinned to a zone that observes
+    // DST, since the suite otherwise runs in UTC and cannot see it.
+    const tz = process.env.TZ;
+    process.env.TZ = 'America/New_York';
+    try {
+      // Nov 1 2026 is the fall-back; Mar 8 2026 the spring-forward.
+      for (const [label, from] of [
+        ['fall back', new Date(2026, 9, 29).getTime()],
+        ['spring forward', new Date(2026, 2, 4).getTime()],
+      ] as const) {
+        const ticks = axisTicks(from, 7 * 86_400_000, 86_400_000);
+        assert.ok(ticks.length > 0, label);
+        const days = new Set<string>();
+        for (const ts of ticks) {
+          const d = new Date(ts);
+          assert.deepEqual(
+            [d.getHours(), d.getMinutes()],
+            [0, 0],
+            `${label}: ${d.toString()}`,
+          );
+          days.add(`${d.getMonth()}-${d.getDate()}`);
+        }
+        // One gridline per calendar day: a drifted tick repeats a date.
+        assert.equal(days.size, ticks.length, label);
+      }
+    } finally {
+      process.env.TZ = tz;
+    }
+  });
 });

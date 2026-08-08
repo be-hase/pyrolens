@@ -12,6 +12,8 @@ import { useEffect, useRef, useState } from 'react';
 //   response over the current one.
 // - The previous error is cleared when a new fetch starts, so a fixed
 //   query does not keep showing the failure of the one before it.
+// - A fetch that is due but has not started counts as loading, so the gap
+//   before the effect runs never renders as an answer.
 
 export interface Fetched<T> {
   data: T;
@@ -21,8 +23,11 @@ export interface Fetched<T> {
 
 /**
  * Runs `load` whenever `active` is true and `deps` change, keeping the last
- * `data` across refetches. `deps` must contain every value `load` reads
- * (they are compared by value, so plain strings and numbers).
+ * `data` across refetches. `deps` must contain every value `load` reads.
+ *
+ * Deps are compared by their JSON form, so pass only strings, finite numbers
+ * and booleans — inside an array `undefined` and `null` both serialize to
+ * `null`, and a dep flipping between the two would not refetch.
  */
 export function useFetched<T>(
   initial: T,
@@ -31,8 +36,14 @@ export function useFetched<T>(
   deps: readonly (string | number | boolean | null | undefined)[],
 ): Fetched<T> {
   const [data, setData] = useState<T>(initial);
-  const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  // The key a fetch has actually been started for, and whether that fetch is
+  // still running. The effect only runs after the commit, so between a deps
+  // change and that effect there is a render holding the previous data with
+  // nothing in flight; reporting "not loading" there shows a stale or empty
+  // result as though it were the answer for the new deps.
+  const [started, setStarted] = useState<string | null>(null);
+  const [inFlight, setInFlight] = useState(false);
 
   // `load` is a fresh closure every render; the fetch effect reads the
   // latest one through a ref so `deps` alone decide when to refetch. The
@@ -49,7 +60,8 @@ export function useFetched<T>(
     const controller = new AbortController();
 
     async function run() {
-      setFetching(true);
+      setStarted(key);
+      setInFlight(true);
       setFetchError(null);
       try {
         const value = await loadRef.current(controller.signal);
@@ -59,7 +71,7 @@ export function useFetched<T>(
         if (controller.signal.aborted) return;
         setFetchError(e instanceof Error ? e.message : String(e));
       } finally {
-        if (!controller.signal.aborted) setFetching(false);
+        if (!controller.signal.aborted) setInFlight(false);
       }
     }
     run();
@@ -67,5 +79,9 @@ export function useFetched<T>(
     return () => controller.abort();
   }, [active, key]);
 
-  return { data, fetching, fetchError };
+  return {
+    data,
+    fetching: active && (started !== key || inFlight),
+    fetchError,
+  };
 }

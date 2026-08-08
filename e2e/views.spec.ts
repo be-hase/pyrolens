@@ -2,10 +2,10 @@ import { expect, test } from '@playwright/test';
 import {
   clearUpstreamLog,
   expectCanvasPainted,
-  failOnPageErrors,
   meta,
   upstreamLog,
   url,
+  watchPageErrors,
 } from './helpers.ts';
 
 // The four views, rendered by the real binary from the real wire format.
@@ -14,8 +14,8 @@ import {
 
 // The fake upstream's request log is shared, so every spec starts from an
 // empty one.
+watchPageErrors();
 test.beforeEach(async ({ page }) => {
-  failOnPageErrors(page);
   await clearUpstreamLog(page);
 });
 
@@ -42,6 +42,30 @@ test('the single view renders a flame graph and a timeline', async ({
   await expect(page.locator('.timeseries-x-label').first()).toBeVisible();
 });
 
+test('axis dates stay fixed English whatever the browser locale is', async ({
+  page,
+}) => {
+  // The browser runs as ja-JP (playwright.config.ts). The axis only reaches
+  // its date branch at a day-scale tick step, which tickStepMs picks between
+  // roughly 6 and 12 days — a shorter range gets 12-hour steps and HH:MM
+  // labels, which would not exercise this at all. The labels must come from
+  // the project's own helpers; a `toLocale*` here renders 1月2日, and has.
+  const day = 86_400_000;
+  await page.goto(
+    url('/', {
+      from: meta.window.end - 10 * day,
+      until: meta.window.end,
+    }),
+  );
+  await expect(page.locator('.timeseries-x-label').first()).toBeVisible();
+
+  const labels = await page.locator('.timeseries-x-label').allInnerTexts();
+  expect(labels.length).toBeGreaterThan(0);
+  for (const label of labels) {
+    expect(label).toMatch(/^[A-Z][a-z]{2} \d{1,2}$/);
+  }
+});
+
 test('the single view asks for exactly the profile the URL names', async ({
   page,
 }) => {
@@ -54,6 +78,15 @@ test('the single view asks for exactly the profile the URL names', async ({
   );
   expect(stacktraces.length).toBeGreaterThan(0);
   expect(stacktraces.every((entry) => entry.tenant === meta.tenant)).toBe(true);
+  // The profile itself, not just that something was asked for: the fake
+  // replays the same fixture whatever it is sent, so a query that lost its
+  // profile_type or sent seconds for milliseconds still renders correctly.
+  for (const entry of stacktraces) {
+    expect(entry.profileTypeID).toBe(meta.profileType);
+    expect(entry.labelSelector).toBe(`{service_name="${meta.service}"}`);
+    expect(entry.start).toBe(meta.window.start);
+    expect(entry.end).toBe(meta.window.end);
+  }
 });
 
 test('the comparison view renders both panes', async ({ page }) => {
@@ -103,15 +136,23 @@ test('the tag explorer breaks the profile down by label', async ({ page }) => {
     await expect(table.getByText(region, { exact: true })).toBeVisible();
   }
 
-  // Shares are a percentage of the total, so they have to add up.
+  // Shares are a percentage of *every* group's total, not of the rows on
+  // screen, so a breakdown truncated to the top 8 sums to less than 100 —
+  // never to more. Asserting ~100 unconditionally would re-encode the bug
+  // where the visible slice was rebased to itself, and would start failing
+  // the day the fixtures are re-recorded against more label values.
   const shares = await table.locator('.tag-explorer-num').allInnerTexts();
   const percentages = shares
     .filter((text) => text.endsWith('%'))
     .map((text) => Number.parseFloat(text));
   expect(percentages.length).toBeGreaterThan(0);
   const total = percentages.reduce((sum, value) => sum + value, 0);
-  expect(total).toBeGreaterThan(99);
   expect(total).toBeLessThan(101);
+  const rows = await table.locator('tbody tr').count();
+  if (rows < 8) {
+    // Nothing was truncated, so these rows are the whole profile.
+    expect(total).toBeGreaterThan(99);
+  }
 });
 
 test('the tag explorer groups by the label the URL names', async ({ page }) => {

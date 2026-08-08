@@ -68,10 +68,21 @@ const server = createServer(async (req, res) => {
   const method = req.url.slice(PREFIX.length);
   const tenant = req.headers['x-scope-orgid'];
   const request = JSON.parse((await body(req)) || '{}');
+  // Enough of the request for a spec to assert what was actually asked for.
+  // With only the method and the tenant here, a regression that queried the
+  // wrong profile type or the wrong window still replayed the same fixture
+  // and every view rendered correctly.
   log.push({
     method,
     tenant: tenant ?? null,
     groupBy: request.groupBy ?? null,
+    profileTypeID: request.profileTypeID ?? request.left?.profileTypeID ?? null,
+    labelSelector: request.labelSelector ?? request.left?.labelSelector ?? null,
+    start: request.start ?? request.left?.start ?? null,
+    end: request.end ?? request.left?.end ?? null,
+    step: request.step ?? null,
+    name: request.name ?? null,
+    limit: request.limit ?? null,
   });
 
   // The tenancy probe: an empty org id is what the UI sends to find out

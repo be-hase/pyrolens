@@ -41,6 +41,7 @@ export function SingleView({
 
       <QueryBar
         query={draft}
+        committedQuery={query}
         onQueryChange={setDraft}
         onRun={(q) => navigate({ set: { query: q } })}
         start={range.start}

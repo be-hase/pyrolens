@@ -40,6 +40,7 @@ export function ComparisonPane({
       <div className="comparison-pane">
         <QueryBar
           query={draft}
+          committedQuery={pane.query}
           onQueryChange={setDraft}
           onRun={(q) => navigate({ set: { [`${pane.side}Query`]: q } })}
           start={mainRange.start}

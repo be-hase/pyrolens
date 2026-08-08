@@ -35,6 +35,7 @@ function setup(initial = '', opts: { loading?: boolean } = {}) {
     return (
       <QueryBar
         query={query}
+        committedQuery={initial}
         onQueryChange={(next) => {
           changes.push(next);
           setQuery(next);
@@ -48,6 +49,36 @@ function setup(initial = '', opts: { loading?: boolean } = {}) {
   }
   render(<Host />);
   return { onRun, changes };
+}
+
+/**
+ * The same loop, but with the committed (URL) value under the test's
+ * control, so it can move the way App does when it writes the default query
+ * in or the user presses Back.
+ */
+function setupCommitted(initial: string) {
+  let commit!: (next: string) => void;
+  function Host() {
+    const [committed, setCommitted] = useState(initial);
+    const [query, setQuery] = useState(initial);
+    commit = (next: string) => {
+      // What useEditBuffer does: the URL wins and the draft is dropped.
+      setCommitted(next);
+      setQuery(next);
+    };
+    return (
+      <QueryBar
+        query={query}
+        committedQuery={committed}
+        onQueryChange={setQuery}
+        onRun={() => {}}
+        start={1_000}
+        end={2_000}
+      />
+    );
+  }
+  render(<Host />);
+  return { commit: (next: string) => act(() => commit(next)) };
 }
 
 const input = () => screen.getByRole('combobox') as HTMLInputElement;
@@ -220,5 +251,28 @@ describe('QueryBar', () => {
     });
     input().dispatchEvent(event);
     assert.equal(event.defaultPrevented, false);
+  });
+
+  it('drops the popup when the committed query moves underneath', async () => {
+    // App writes the default query in once the service list lands, which can
+    // happen while the user is already typing. The caret and the popup belong
+    // to the text that just got replaced: left alone, the popup re-opens
+    // against the new text at the old offset, and accepting a suggestion
+    // splices into it — turning the service selector into something else.
+    namesOf.mockResolvedValue(['region', 'pod', 'service_name']);
+    const defaultQuery =
+      '{service_name="checkout", profile_type="cpu:a:b:c:d"}';
+
+    const { commit } = setupCommitted('');
+    type('{se');
+    await settle();
+    assert.ok(listbox(), 'the popup should be open before the URL moves');
+
+    commit(defaultQuery);
+    await settle();
+    // Caret 3 into the new text is '{se' again, so a stale caret would keep
+    // offering `service_name` over a query that already has it.
+    assert.ok(!listbox());
+    assert.equal(input().value, defaultQuery);
   });
 });

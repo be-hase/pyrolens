@@ -159,10 +159,21 @@ const FlameGraphTopTableContainer = memo(
 
     // Only render the rows that can be on screen, the table can easily hold
     // thousands of symbols.
-    const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+    //
+    // The scroll offset is clamped to the current row count before the window
+    // is derived from it: filtering the table while scrolled down otherwise
+    // leaves `start` past the end, so the window is empty while the padding
+    // keeps the content tall enough that the browser never corrects the
+    // scroll — a blank table over a huge empty area until the user scrolls up.
+    const maxScrollTop = Math.max(
+      0,
+      sortedRows.length * ROW_HEIGHT - viewportHeight,
+    );
+    const offset = Math.min(scrollTop, maxScrollTop);
+    const start = Math.max(0, Math.floor(offset / ROW_HEIGHT) - OVERSCAN);
     const end = Math.min(
       sortedRows.length,
-      Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + OVERSCAN,
+      Math.ceil((offset + viewportHeight) / ROW_HEIGHT) + OVERSCAN,
     );
     const visibleRows = sortedRows.slice(start, end);
     const paddingTop = start * ROW_HEIGHT;

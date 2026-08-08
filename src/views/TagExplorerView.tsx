@@ -146,6 +146,7 @@ export function TagExplorerView({
               key={label}
               type="button"
               className={`tag-explorer-label${label === groupBy ? ' active' : ''}`}
+              aria-pressed={label === groupBy}
               onClick={() => navigate({ set: { groupBy: label } })}
             >
               {label}

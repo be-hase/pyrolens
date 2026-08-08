@@ -311,9 +311,15 @@ export class FlameGraphDataContainer {
     this.valueRightField = getFieldByName(data, 'valueRight');
     this.selfRightField = getFieldByName(data, 'selfRight');
 
+    // The *right* pair is what this guards: `value` and `self` are already
+    // required by checkFields above, so testing those made the condition
+    // permanently false. A frame with only one of the diff columns then got
+    // through, isDiffFlamegraph() reported false, and nestedSetToLevels still
+    // summed value + valueRight — rendering a non-diff profile whose totals
+    // and every percentage were double-counted.
     if (
-      (this.valueField || this.selfField) &&
-      !(this.valueField && this.selfField)
+      (this.valueRightField || this.selfRightField) &&
+      !(this.valueRightField && this.selfRightField)
     ) {
       throw new Error(
         'Malformed dataFrame: both valueRight and selfRight has to be present if one of them is present.',
