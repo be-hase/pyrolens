@@ -177,10 +177,22 @@ export function axisTicks(
 ): number[] {
   const out: number[] = [];
   const end = startMs + durationMs;
-  const offsetMs = new Date(startMs).getTimezoneOffset() * 60_000;
-  const first = Math.ceil((startMs - offsetMs) / stepMs) * stepMs + offsetMs;
-  for (let ts = first; ts <= end; ts += stepMs) {
-    out.push(ts);
+  // The offset is re-read at every tick, not extrapolated from the first:
+  // across a DST transition a fixed offset walks the ticks an hour off, which
+  // shows up as two gridlines labelled with the same date and none for the
+  // next one.
+  const snap = (ms: number, round: (n: number) => number) => {
+    const offsetMs = new Date(ms).getTimezoneOffset() * 60_000;
+    return round((ms - offsetMs) / stepMs) * stepMs + offsetMs;
+  };
+
+  let ts = snap(startMs, Math.ceil);
+  while (ts <= end) {
+    if (ts >= startMs) out.push(ts);
+    // Re-snapping can land on the tick we came from when the offset shifts;
+    // stepping raw keeps the loop moving.
+    const next = snap(ts + stepMs, Math.round);
+    ts = next > ts ? next : ts + stepMs;
   }
   return out;
 }

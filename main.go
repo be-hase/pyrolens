@@ -101,9 +101,11 @@ func newHandler(dist fs.FS, index []byte, proxy http.Handler) http.Handler {
 			}
 			// A missing file must 404, not masquerade as the SPA shell —
 			// stale HTML would otherwise load as a text/html "script" (or a
-			// broken icon mask). View routes carry no extension, so a dot in
-			// the last segment marks a file request.
-			if last := path[strings.LastIndex(path, "/")+1:]; strings.Contains(last, ".") {
+			// broken icon mask). Everything under assets/ is a file by
+			// construction; elsewhere, view routes carry no extension, so a
+			// dot in the last segment marks a file request.
+			last := path[strings.LastIndex(path, "/")+1:]
+			if strings.HasPrefix(path, "assets/") || strings.Contains(last, ".") {
 				http.NotFound(w, r)
 				return
 			}

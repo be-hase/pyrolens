@@ -144,6 +144,10 @@ func TestMissingFileIsNotFound(t *testing.T) {
 		"/assets/index-stale.js",
 		"/icons/typo.svg",
 		"/missing.svg",
+		// Under assets/ everything is a file, extension or not: falling back
+		// here would serve HTML for a hashed bundle a stale page asked for.
+		"/assets/index-stale",
+		"/assets/",
 	} {
 		rec := get(t, h, path)
 		if rec.Code != http.StatusNotFound {
