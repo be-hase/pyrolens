@@ -70,8 +70,8 @@ the binaries and the image.
 
 - `main.go` — the entire server. Serves the embedded SPA (with an
   `index.html` fallback so deep links work), proxies
-  `/querier.v1.QuerierService/*` and `/pyroscope/*` to `PYROSCOPE_URL`,
-  answers `/healthz`. Standard library only.
+  `/querier.v1.QuerierService/*` to `PYROSCOPE_URL`, answers `/healthz`.
+  Standard library only.
 - `src/urlState.ts` — routing over `history.pushState`. `navigate()` writes
   params and dispatches `pyroscope:navigate`; `useRoute()` subscribes.
 - `src/App.tsx` — resolves the URL into `ViewProps`, owns the tenant flow

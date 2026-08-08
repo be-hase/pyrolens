@@ -17,7 +17,6 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
-	"path"
 	"strings"
 	"syscall"
 	"time"
@@ -29,10 +28,29 @@ var distFS embed.FS
 // Set by the linker at release time (-X main.version=...).
 var version = "dev"
 
-// Paths forwarded to the Pyroscope server. Everything else is the SPA.
-var proxyPrefixes = []string{
-	"/querier.v1.QuerierService/",
-	"/pyroscope/",
+const querierPrefix = "/querier.v1.QuerierService/"
+
+// The querier RPCs the UI calls, and nothing else — what the browser can
+// reach upstream is a decision here, not a side effect of whatever the
+// Pyroscope server happens to expose. Adding a call in src/api/client.ts
+// means adding it here.
+//
+// This replaced a pair of path prefixes. "/pyroscope/*" was one of them and
+// the UI has never called it, but a real Pyroscope serves its legacy HTTP API
+// there — /pyroscope/ingest included, which answers POST. That turned a
+// read-only viewer into a write path: anything that could reach this binary
+// could store profiles under any tenant. Verified by ingesting through the
+// proxy and reading the service back out of Pyroscope.
+//
+// Matching the method exactly also settles path traversal for free: an
+// encoded "%2e%2e%2f" decodes into the method name and simply fails to match.
+var proxyMethods = map[string]bool{
+	"Diff":                   true,
+	"LabelNames":             true,
+	"LabelValues":            true,
+	"SelectMergeStacktraces": true,
+	"SelectSeries":           true,
+	"Series":                 true,
 }
 
 // How long a termination signal waits for in-flight queries. Long enough for
@@ -94,16 +112,6 @@ func newProxy(target *url.URL) *httputil.ReverseProxy {
 	return proxy
 }
 
-// isCanonicalPath reports whether p is already in cleaned form. A trailing
-// slash is allowed, since path.Clean strips one and "/pyroscope/" needs it.
-func isCanonicalPath(p string) bool {
-	clean := path.Clean(p)
-	if clean != "/" && strings.HasSuffix(p, "/") {
-		clean += "/"
-	}
-	return clean == p
-}
-
 // newHandler routes the query API to Pyroscope and everything else to the
 // embedded UI, whose shell is `index`.
 func newHandler(dist fs.FS, index []byte, proxy http.Handler) http.Handler {
@@ -114,26 +122,16 @@ func newHandler(dist fs.FS, index []byte, proxy http.Handler) http.Handler {
 		fmt.Fprintln(w, "ok")
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		for _, prefix := range proxyPrefixes {
-			if strings.HasPrefix(r.URL.Path, prefix) {
-				// Belt and braces, not a fix for a live hole. ServeMux cleans
-				// the *escaped* path, so "%2e%2e%2f" survives it and arrives
-				// here decoded as real ".." segments, which a plain prefix
-				// test accepts; the proxy then forwards the original encoding.
-				// Measured against Pyroscope 2.2.1 that reaches nothing — its
-				// router normalises and answers 301 with a relative Location,
-				// so no body comes back and a POST is not re-issued. It would
-				// matter only behind a hop that normalises and serves instead
-				// (some ingress configurations), which is unverified. Cheap
-				// enough to just require a canonical path.
-				if !isCanonicalPath(r.URL.Path) {
-					http.Error(w, "bad request", http.StatusBadRequest)
-					return
-				}
-				r.Body = http.MaxBytesReader(w, r.Body, 16<<20)
-				proxy.ServeHTTP(w, r)
+		if method, ok := strings.CutPrefix(r.URL.Path, querierPrefix); ok {
+			if !proxyMethods[method] {
+				// An API path, so say so rather than handing back the SPA
+				// shell the fallback below would produce.
+				http.NotFound(w, r)
 				return
 			}
+			r.Body = http.MaxBytesReader(w, r.Body, 16<<20)
+			proxy.ServeHTTP(w, r)
+			return
 		}
 		// Serve real files as-is; anything unknown falls back to the SPA
 		// shell so history-based routes (/comparison, /diff, ...) deep-link.

@@ -162,9 +162,11 @@ func TestMissingFileIsNotFound(t *testing.T) {
 func TestProxiesQueryPaths(t *testing.T) {
 	proxied := []string{
 		"/querier.v1.QuerierService/LabelNames",
+		"/querier.v1.QuerierService/LabelValues",
+		"/querier.v1.QuerierService/Series",
+		"/querier.v1.QuerierService/SelectSeries",
 		"/querier.v1.QuerierService/SelectMergeStacktraces",
-		"/pyroscope/render",
-		"/pyroscope/",
+		"/querier.v1.QuerierService/Diff",
 	}
 	for _, path := range proxied {
 		h, proxy := newTestHandler()
@@ -178,9 +180,16 @@ func TestProxiesQueryPaths(t *testing.T) {
 		}
 	}
 
+	// "/pyroscope/*" is deliberately absent from the allowlist: a real
+	// Pyroscope serves its legacy HTTP API there, /pyroscope/ingest included,
+	// and the UI has never called any of it. Forwarding it turned a read-only
+	// viewer into a write path.
 	notProxied := []string{
 		"/querier.v1.QuerierService",
 		"/pyroscope",
+		"/pyroscope/",
+		"/pyroscope/render",
+		"/pyroscope/ingest",
 		"/api/pyroscope/render",
 		"/",
 	}
@@ -211,55 +220,30 @@ func TestSecurityHeaders(t *testing.T) {
 	}
 }
 
-func TestEncodedTraversalIsNotProxied(t *testing.T) {
-	// ServeMux cleans the escaped path, so a literal "/pyroscope/../admin" is
-	// redirected before the handler sees it — but "%2e%2e%2f" survives and
-	// decodes into r.URL.Path, passing a plain prefix check. Pyroscope itself
-	// answers such a request with a redirect and no body, so nothing leaked;
-	// this keeps the prefix test meaning what it says regardless of what sits
-	// upstream.
-	traversals := []string{
-		"/pyroscope/%2e%2e%2fadmin",
-		"/pyroscope/%2e%2e%2f",
+func TestOnlyTheMethodsTheUIUsesAreProxied(t *testing.T) {
+	// The allowlist is the set of RPCs src/api/client.ts calls. Anything else
+	// under the querier prefix is a 404 rather than a forward, so what the
+	// browser can reach upstream does not grow with whatever the Pyroscope
+	// server happens to expose.
+	refused := []string{
+		// Real querier RPCs the UI has no use for.
+		"/querier.v1.QuerierService/ProfileTypes",
+		"/querier.v1.QuerierService/AnalyzeQuery",
+		"/querier.v1.QuerierService/",
+		// Traversal falls out of the same check: the encoding decodes into
+		// the method name and simply does not match.
+		"/querier.v1.QuerierService/%2e%2e%2fadmin",
 		"/querier.v1.QuerierService/%2e%2e%2f%2e%2e%2fingest",
+		"/querier.v1.QuerierService/Series%2f..%2fingest",
 	}
-	for _, target := range traversals {
+	for _, target := range refused {
 		h, proxy := newTestHandler()
 		rec := get(t, h, target)
 		if proxy.called {
 			t.Errorf("%s: reached the proxy", target)
 		}
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("%s: status got %d, want 400", target, rec.Code)
-		}
-	}
-
-	// The unencoded forms never reach the handler: ServeMux cleans the
-	// escaped path and redirects first. Asserted so a future router change
-	// that stops doing that is caught here rather than in production.
-	for _, target := range []string{"/pyroscope/../admin", "/pyroscope//render"} {
-		h, proxy := newTestHandler()
-		rec := get(t, h, target)
-		if proxy.called {
-			t.Errorf("%s: reached the proxy", target)
-		}
-		// Which 3xx is ServeMux's business; that it redirects rather than
-		// forwarding is ours.
-		if rec.Code < 300 || rec.Code >= 400 {
-			t.Errorf("%s: status got %d, want a redirect", target, rec.Code)
-		}
-	}
-
-	// The legitimate shapes must still go through, trailing slash included.
-	for _, target := range []string{
-		"/pyroscope/",
-		"/pyroscope/render",
-		"/querier.v1.QuerierService/SelectMergeStacktraces",
-	} {
-		h, proxy := newTestHandler()
-		get(t, h, target)
-		if !proxy.called {
-			t.Errorf("%s: was not proxied", target)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s: status got %d, want 404", target, rec.Code)
 		}
 	}
 }
