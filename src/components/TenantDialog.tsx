@@ -34,7 +34,11 @@ export function TenantDialog({
   };
 
   return (
-    <div className="tenant-backdrop">
+    // The dialog blocks the app, but a click on the backdrop would otherwise
+    // blur the input and drop focus to <body>; from there Tab walks into the
+    // NavBar behind the overlay, where every control queries without a
+    // tenant. Preventing the default keeps focus where the trap can see it.
+    <div className="tenant-backdrop" onMouseDown={(e) => e.preventDefault()}>
       <div
         ref={dialogRef}
         className="tenant-dialog"
@@ -64,6 +68,7 @@ export function TenantDialog({
           <input
             className="tenant-dialog-input"
             type="text"
+            aria-label="Tenant ID"
             placeholder="e.g. anonymous"
             value={value}
             onChange={(e) => setValue(e.target.value)}

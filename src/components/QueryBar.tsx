@@ -8,6 +8,7 @@ import './QueryBar.css';
 // operator, label values.
 export function QueryBar({
   query,
+  committedQuery,
   onQueryChange,
   onRun,
   start,
@@ -15,7 +16,10 @@ export function QueryBar({
   tenantID,
   loading = false,
 }: {
+  /** The draft being edited (an edit buffer over `committedQuery`). */
   query: string;
+  /** The query as the URL holds it; a change re-anchors the typeahead. */
+  committedQuery: string;
   onQueryChange: (query: string) => void;
   onRun: (query: string) => void;
   start: number;
@@ -30,6 +34,20 @@ export function QueryBar({
   const [caret, setCaret] = useState(query.length);
   const [open, setOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
+
+  // The caret offset and the open popup belong to the text the user was
+  // editing. When the URL moves underneath — Back, a link, or App writing
+  // the default query in once the service list lands — useEditBuffer drops
+  // the draft and that text is gone, so a caret into it now points at
+  // something else and accepting a suggestion would splice into the wrong
+  // place. Reset during render, the same rule the edit buffer itself uses.
+  const [prevCommitted, setPrevCommitted] = useState(committedQuery);
+  if (prevCommitted !== committedQuery) {
+    setPrevCommitted(committedQuery);
+    setCaret(query.length);
+    setOpen(false);
+    setActiveIdx(0);
+  }
 
   const { suggestions, apply } = useLabelSuggestions({
     text: query,
@@ -90,6 +108,7 @@ export function QueryBar({
           className="querybar-input"
           type="text"
           role="combobox"
+          aria-label="Query selector"
           aria-expanded={showing}
           aria-controls={listId}
           aria-activedescendant={

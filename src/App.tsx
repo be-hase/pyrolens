@@ -225,7 +225,7 @@ export function App() {
                 <p className="app-error-detail">{servicesError}</p>
               </div>
             )}
-            <ErrorBoundary key={path}>
+            <ErrorBoundary key={path} resetKey={params.toString()}>
               <View
                 services={services}
                 servicesLoading={servicesLoading}
