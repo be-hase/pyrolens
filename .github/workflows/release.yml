@@ -128,6 +128,12 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The tag that triggered this run, stated explicitly. GoReleaser
+          # otherwise guesses the version from whichever tag points at HEAD,
+          # and the rc-then-release flow puts two there (v0.1.0-rc.1 and
+          # v0.1.0 on the same commit) — the v0.1.0 run then rebuilt and
+          # tried to republish the rc, 422ing on its own assets.
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
       # Provenance for the archives: checksums.txt is "<digest>  <filename>"
       # per line — every archive plus its SBOM, NOT the checksums file
       # itself (verified against v2.17.1's actual output). The GitHub
