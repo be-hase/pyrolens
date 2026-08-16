@@ -136,23 +136,37 @@ test('the tag explorer breaks the profile down by label', async ({ page }) => {
     await expect(table.getByText(region, { exact: true })).toBeVisible();
   }
 
-  // Shares are a percentage of *every* group's total, not of the rows on
-  // screen, so a breakdown truncated to the top 8 sums to less than 100 —
-  // never to more. Asserting ~100 unconditionally would re-encode the bug
-  // where the visible slice was rebased to itself, and would start failing
-  // the day the fixtures are re-recorded against more label values.
+  // The table lists every row (only the chart above is capped at 8), so
+  // shares — a percentage of *every* group's total — should sum to ~100
+  // regardless of how many rows the fixture has. Asserting a tight bound
+  // here would re-encode the old truncation bug, where a visible slice was
+  // rebased to itself and summed to more than 100.
   const shares = await table.locator('.tag-explorer-num').allInnerTexts();
   const percentages = shares
     .filter((text) => text.endsWith('%'))
     .map((text) => Number.parseFloat(text));
   expect(percentages.length).toBeGreaterThan(0);
   const total = percentages.reduce((sum, value) => sum + value, 0);
+  expect(total).toBeGreaterThan(99);
   expect(total).toBeLessThan(101);
-  const rows = await table.locator('tbody tr').count();
-  if (rows < 8) {
-    // Nothing was truncated, so these rows are the whole profile.
-    expect(total).toBeGreaterThan(99);
-  }
+});
+
+test('sorting the breakdown table by a column writes it to the URL', async ({
+  page,
+}) => {
+  await page.goto(url('/explore', { groupBy: 'region' }));
+  const table = page.locator('.tag-explorer-table');
+  await expect(table).toBeVisible();
+
+  await table.getByRole('button', { name: 'Max', exact: true }).click();
+  await expect(page).toHaveURL(/[?&]sort=max(&|$)/);
+  await expect(
+    table.locator('th[aria-sort="descending"]', { hasText: 'Max' }),
+  ).toBeVisible();
+
+  // Clicking the active header again returns to the default ranking.
+  await table.getByRole('button', { name: 'Max', exact: true }).click();
+  await expect(page).not.toHaveURL(/[?&]sort=/);
 });
 
 test('the tag explorer groups by the label the URL names', async ({ page }) => {

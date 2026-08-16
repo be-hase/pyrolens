@@ -28,6 +28,26 @@
   font-weight: var(--weight-medium);
 }
 
+.cascade-filter {
+  box-sizing: border-box;
+  width: calc(100% - 24px);
+  margin: 0 12px 6px;
+  padding: 4px 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.cascade-filter:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--color-primary) 25%, transparent);
+}
+
 .cascade-col-list {
   max-height: 320px;
   overflow-y: auto;
@@ -50,6 +70,13 @@
 }
 
 .cascade-option:hover {
+  background: var(--action-hover);
+}
+
+/* The row ArrowDown/ArrowUp is currently on, before Enter commits it. Reuses
+   the hover surface — a keyboard highlight is standing in for the pointer,
+   not a separate state — but loses to .active below when the two coincide. */
+.cascade-option.highlighted {
   background: var(--action-hover);
 }
 

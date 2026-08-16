@@ -399,6 +399,120 @@ describe('TimeRangePicker', () => {
     });
   });
 
+  describe('the `t z` / `t ArrowLeft` / `t ArrowRight` shortcuts', () => {
+    it('`t z` zooms out 2x, centered on the current range', () => {
+      const from = String(new Date(2026, 0, 2, 9, 0, 0).getTime());
+      const until = String(new Date(2026, 0, 2, 11, 0, 0).getTime());
+      const range = rangeOf(from, until);
+      render(<TimeRangePicker from={from} until={until} range={range} />);
+
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'z' });
+
+      const half = (range.end - range.start) / 2;
+      assert.equal(params().get('from'), String(range.start - half));
+      assert.equal(params().get('until'), String(range.end + half));
+    });
+
+    it('`t ArrowLeft` shifts the window back by half its span', () => {
+      const from = String(new Date(2026, 0, 2, 9, 0, 0).getTime());
+      const until = String(new Date(2026, 0, 2, 11, 0, 0).getTime());
+      const range = rangeOf(from, until);
+      render(<TimeRangePicker from={from} until={until} range={range} />);
+
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'ArrowLeft' });
+
+      const half = (range.end - range.start) / 2;
+      assert.equal(params().get('from'), String(range.start - half));
+      assert.equal(params().get('until'), String(range.end - half));
+    });
+
+    it('`t ArrowRight` shifts the window forward by half its span when it is far in the past', () => {
+      const from = String(new Date(2026, 0, 2, 9, 0, 0).getTime());
+      const until = String(new Date(2026, 0, 2, 11, 0, 0).getTime());
+      const range = rangeOf(from, until);
+      render(<TimeRangePicker from={from} until={until} range={range} />);
+
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'ArrowRight' });
+
+      const half = (range.end - range.start) / 2;
+      assert.equal(params().get('from'), String(range.start + half));
+      assert.equal(params().get('until'), String(range.end + half));
+    });
+
+    it('`t ArrowRight` does nothing once the window already reaches "now"', () => {
+      // end is a few seconds ahead of "now" at construction time — comfortably
+      // still ahead of whatever Date.now() the handler reads at dispatch (a
+      // few ms later), so the guard reliably sees range.end >= now without
+      // racing the clock.
+      const now = Date.now();
+      const from = String(now - 3_600_000);
+      const until = String(now + 5_000);
+      const range = rangeOf(from, until);
+      render(<TimeRangePicker from={from} until={until} range={range} />);
+
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'ArrowRight' });
+
+      assert.equal(params().has('from'), false);
+      assert.equal(params().has('until'), false);
+    });
+
+    it('`t ArrowRight` is a no-op for a relative range ending at "now"', () => {
+      // range.end is a snapshot of "now" taken whenever `range` was last
+      // resolved; the real clock keeps moving after that, so by the time the
+      // handler's own Date.now() runs, range.end is already behind it and
+      // the range.end>=now guard alone reads false. Guarding on the
+      // committed `until` value first — "now" is never behind "now" — is
+      // what has to keep this a no-op rather than converting the range to
+      // absolute and shifting it by whatever few milliseconds elapsed.
+      at('/?from=now-1h');
+      const range = rangeOf('now-1h', 'now');
+      render(<TimeRangePicker from="now-1h" until="now" range={range} />);
+
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'ArrowRight' });
+
+      assert.equal(params().get('from'), 'now-1h');
+      assert.equal(params().has('until'), false);
+    });
+
+    it('`t ArrowRight` clamps to "now" instead of overshooting when the shift would pass it', () => {
+      // The untested branch of shiftForward: `range.end` is in the past, but
+      // `range.end + span/2` overshoots "now" — the result must clamp to
+      // [now - span, now] rather than land past "now" or shrink the span.
+      // This file has no Date mocking convention (see the rest of this
+      // suite), so rather than pin an exact instant, this asserts the two
+      // invariants the clamp promises: the span survives intact and the new
+      // `until` lands within the window the real clock could have produced
+      // between dispatch and this assertion.
+      const span = 3_600_000; // 1h
+      // A quarter-span into the past: still comfortably true that
+      // `range.end + span/2 > now` (an eighth-span margin) without being so
+      // close to "now" that a slow CI runner could flip the branch.
+      const end = Date.now() - span / 4;
+      const from = String(end - span);
+      const until = String(end);
+      const range = rangeOf(from, until);
+      render(<TimeRangePicker from={from} until={until} range={range} />);
+
+      const before = Date.now();
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'ArrowRight' });
+      const after = Date.now();
+
+      const newFrom = Number(params().get('from'));
+      const newUntil = Number(params().get('until'));
+      assert.ok(
+        newUntil >= before && newUntil <= after,
+        `until ${newUntil} outside [${before}, ${after}]`,
+      );
+      assert.equal(newUntil - newFrom, span);
+    });
+  });
+
   describe('the `t c` / `t v` shortcuts', () => {
     const originalClipboard = navigator.clipboard;
 

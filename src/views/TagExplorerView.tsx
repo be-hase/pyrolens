@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ViewProps } from '../App';
 import { ControlsBar } from '@components/ControlsBar';
 import { MultiTimeSeries, type NamedSeries } from '@components/MultiTimeSeries';
@@ -14,17 +14,37 @@ import { useFetched } from '@hooks/useFetched';
 import { malformedMessage } from '@hooks/useProfileData';
 import { splitQuery, toInternalLabel, upsertMatcher } from '../queryLang';
 import { timelineStep } from '../time';
-import { formatCell, groupByLabels, summarize } from './tagExplorerData';
+import {
+  formatCell,
+  groupByLabels,
+  sortRows,
+  summarize,
+  type SortKey,
+} from './tagExplorerData';
 import { navigate, useRoute } from '../urlState';
 import './TagExplorerView.css';
 
 const MAX_SERIES = 8;
+
+// The breakdown table renders this many rows before making the rest an
+// explicit click. A high-cardinality groupBy can produce thousands of rows —
+// three buttons and a chip cell apiece — and committing all of them on every
+// sort or navigation cost multiple seconds. 50 is comfortably past what
+// anyone actually scans by eye, so the cap is never felt in practice, while
+// the full set stays one click away for the rare case it matters.
+const TABLE_PAGE_SIZE = 50;
 
 // Display placeholder for a series missing the group-by label. Missingness
 // itself is tracked structurally (GroupedTimeline.labelValue is null), so
 // this is purely cosmetic — it never has to be told apart from a series
 // whose label value is literally the string "(none)".
 const NONE_LABEL = '(none)';
+
+// The discriminator a table row is keyed on: a genuinely missing label
+// (value === null) and a series whose value is literally the string
+// "(none)" both display as NONE_LABEL but must stay distinct rows.
+const rowKey = (value: string | null) =>
+  value === null ? ' none' : 'v' + value;
 
 // Break down a profile by one label: a timeline per label value plus a table
 // with totals. Rows link into Single / Comparison / Diff with the matcher
@@ -93,11 +113,54 @@ export function TagExplorerView({
       })),
     [grouped.data],
   );
-  // Shares are computed across every group; only the top slice is drawn and
+  // Shares are computed across every group, not just the ones drawn or
   // listed, or the percentages would be rebased to the visible rows.
   const allRows = useMemo(() => summarize(allSeries), [allSeries]);
+  // Only the chart is capped — the value a user hunts is often outside the
+  // top 8 by total, so the table lists every row.
   const series = allSeries.slice(0, MAX_SERIES);
-  const rows = allRows.slice(0, MAX_SERIES);
+
+  const sortParam = params.get('sort');
+  const sortKey: SortKey =
+    sortParam === 'avg' || sortParam === 'max' ? sortParam : null;
+  const rows = useMemo(() => sortRows(allRows, sortKey), [allRows, sortKey]);
+  const toggleSort = (key: SortKey) => {
+    // Clicking the active header returns to the default sum/share ranking;
+    // clicking another switches to it. Always descending — these are
+    // magnitudes and the hunt is "largest first".
+    navigate({ set: { sort: sortKey === key ? null : key } });
+  };
+
+  // Whether the table has been expanded past TABLE_PAGE_SIZE. A new dataset
+  // — a different groupBy or a different query — must not inherit a previous
+  // expansion, or a screen that used to need "Show all" stays expanded (and
+  // slow to commit) after navigating to one that doesn't need it. Re-sorting
+  // the same dataset should *not* reset it, so this keys off groupBy/query
+  // rather than `sortKey`. Same previous-value-during-render pattern as
+  // TimeRangePicker's `committed`/CalendarPopover's `previousSelected` — an
+  // effect would leave one render showing the stale (possibly huge) table
+  // before catching up.
+  const [prevExpandKey, setPrevExpandKey] = useState(`${groupBy}|${query}`);
+  const [showAllRows, setShowAllRows] = useState(false);
+  const expandKey = `${groupBy}|${query}`;
+  if (prevExpandKey !== expandKey) {
+    setPrevExpandKey(expandKey);
+    setShowAllRows(false);
+  }
+  // Sort semantics stay over the full set — sort, then slice — so paging
+  // never changes which rows rank where; it only limits how many render.
+  const visibleRows = showAllRows ? rows : rows.slice(0, TABLE_PAGE_SIZE);
+
+  // The chip is the row's palette slot in the chart, which ranks by sum —
+  // not the table's current sort order — so it is computed from the top 8
+  // of `allRows` regardless of how `rows` is currently sorted.
+  const chartIndexByValue = useMemo(() => {
+    const map = new Map<string, number>();
+    allRows
+      .slice(0, MAX_SERIES)
+      .forEach((row, i) => map.set(rowKey(row.value), i));
+    return map;
+  }, [allRows]);
 
   const unit = profileTypeUnit(profileTypeID);
   const fmt = (v: number) => formatCell(v, unit);
@@ -191,57 +254,95 @@ export function TagExplorerView({
               <tr>
                 <th />
                 <th className="tag-explorer-th-left">{groupBy || 'value'}</th>
-                <th>Share</th>
-                <th>Avg</th>
-                <th>Max</th>
+                <th aria-sort={sortKey === null ? 'descending' : undefined}>
+                  <button
+                    type="button"
+                    className="tag-explorer-sort-th"
+                    onClick={() => toggleSort(null)}
+                  >
+                    Share
+                  </button>
+                </th>
+                <th aria-sort={sortKey === 'avg' ? 'descending' : undefined}>
+                  <button
+                    type="button"
+                    className="tag-explorer-sort-th"
+                    onClick={() => toggleSort('avg')}
+                  >
+                    Avg
+                  </button>
+                </th>
+                <th aria-sort={sortKey === 'max' ? 'descending' : undefined}>
+                  <button
+                    type="button"
+                    className="tag-explorer-sort-th"
+                    onClick={() => toggleSort('max')}
+                  >
+                    Max
+                  </button>
+                </th>
                 <th className="tag-explorer-th-left">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, i) => (
-                // Keyed on the discriminator, not the display label: a
-                // missing-label bucket and a literal "(none)" bucket both
-                // display as NONE_LABEL but must stay distinct rows.
-                <tr key={row.value === null ? ' none' : 'v' + row.value}>
-                  <td className="tag-explorer-chip-cell">
-                    {/* Rows and series come from the same ranking, so the
-                        row's position is its palette slot in the chart. */}
-                    <span
-                      className="multi-timeseries-chip"
-                      style={{ background: SERIES_COLORS[i] }}
-                    />
-                  </td>
-                  <td className="tag-explorer-value-cell">
-                    <button
-                      type="button"
-                      className="tag-explorer-value-link"
-                      title="Open in Single view"
-                      onClick={() => selectRow(row.value)}
-                    >
-                      {row.label}
-                    </button>
-                  </td>
-                  <td className="tag-explorer-num">{row.share.toFixed(1)}%</td>
-                  <td className="tag-explorer-num">{fmt(row.avg)}</td>
-                  <td className="tag-explorer-num">{fmt(row.max)}</td>
-                  <td className="tag-explorer-actions">
-                    <button
-                      type="button"
-                      onClick={() => compareRow(row.value, '/comparison')}
-                    >
-                      Compare
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => compareRow(row.value, '/diff')}
-                    >
-                      Diff
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {visibleRows.map((row) => {
+                const chipIndex = chartIndexByValue.get(rowKey(row.value));
+                return (
+                  // Keyed on the discriminator, not the display label: a
+                  // missing-label bucket and a literal "(none)" bucket both
+                  // display as NONE_LABEL but must stay distinct rows.
+                  <tr key={rowKey(row.value)}>
+                    <td className="tag-explorer-chip-cell">
+                      {chipIndex !== undefined && (
+                        <span
+                          className="multi-timeseries-chip"
+                          style={{ background: SERIES_COLORS[chipIndex] }}
+                        />
+                      )}
+                    </td>
+                    <td className="tag-explorer-value-cell">
+                      <button
+                        type="button"
+                        className="tag-explorer-value-link"
+                        title="Open in Single view"
+                        onClick={() => selectRow(row.value)}
+                      >
+                        {row.label}
+                      </button>
+                    </td>
+                    <td className="tag-explorer-num">
+                      {row.share.toFixed(1)}%
+                    </td>
+                    <td className="tag-explorer-num">{fmt(row.avg)}</td>
+                    <td className="tag-explorer-num">{fmt(row.max)}</td>
+                    <td className="tag-explorer-actions">
+                      <button
+                        type="button"
+                        onClick={() => compareRow(row.value, '/comparison')}
+                      >
+                        Compare
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => compareRow(row.value, '/diff')}
+                      >
+                        Diff
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
+        )}
+        {!showAllRows && rows.length > TABLE_PAGE_SIZE && (
+          <button
+            type="button"
+            className="tag-explorer-show-all"
+            onClick={() => setShowAllRows(true)}
+          >
+            Show all {rows.length} rows
+          </button>
         )}
       </Panel>
     </div>

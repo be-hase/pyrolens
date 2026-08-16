@@ -228,3 +228,113 @@ describe('CascadeSelect selection', () => {
     assert.equal(onChange.mock.calls.length, 0);
   });
 });
+
+describe('CascadeSelect filter', () => {
+  it('narrows the visible services as the filter is typed', () => {
+    const { trigger } = setup();
+    fireEvent.click(trigger);
+    const { groups } = columns();
+    fireEvent.change(groups.getByPlaceholderText(/Filter/), {
+      target: { value: 'checkout' },
+    });
+    assert.ok(columns().groups.getByText('checkout-service'));
+    assert.ok(!columns().groups.queryByText('billing-service'));
+    assert.ok(!columns().groups.queryByText('quiet-service'));
+  });
+
+  it('restores every service once the filter is cleared', () => {
+    const { trigger } = setup();
+    fireEvent.click(trigger);
+    const filterInput = columns().groups.getByPlaceholderText(/Filter/);
+    fireEvent.change(filterInput, { target: { value: 'checkout' } });
+    fireEvent.change(filterInput, { target: { value: '' } });
+    const { groups } = columns();
+    for (const group of GROUPS) {
+      assert.ok(groups.getByText(group.label), group.label);
+    }
+  });
+
+  it('fuzzy-matches a non-prefix substring', () => {
+    // "out" is nowhere near the start of "checkout-service"; a prefix-only
+    // filter would drop it.
+    const { trigger } = setup();
+    fireEvent.click(trigger);
+    fireEvent.change(columns().groups.getByPlaceholderText(/Filter/), {
+      target: { value: 'out' },
+    });
+    assert.ok(columns().groups.getByText('checkout-service'));
+  });
+
+  it('selects the highlighted service on ArrowDown then Enter', () => {
+    // Two steps down from GROUPS[0] (checkout-service) lands on GROUPS[1]
+    // (billing-service) — an Enter that always took index 0 regardless of
+    // how many times ArrowDown fired would still show checkout-service's
+    // items and pass a single-ArrowDown version of this test.
+    const { trigger } = setup();
+    fireEvent.click(trigger);
+    const filterInput = columns().groups.getByPlaceholderText(/Filter/);
+    fireEvent.keyDown(filterInput, { key: 'ArrowDown' });
+    fireEvent.keyDown(filterInput, { key: 'ArrowDown' });
+    fireEvent.keyDown(filterInput, { key: 'Enter' });
+    const { items } = columns();
+    assert.ok(items.getByText('cpu'));
+    assert.ok(!items.queryByText('alloc_space'));
+  });
+
+  it('ArrowUp with nothing highlighted starts from the last service, not the second-to-last', () => {
+    // `(-1 - 1 + N) % N` is N-2, which would land on billing-service
+    // (GROUPS[1]) instead of the actual last row, quiet-service (GROUPS[2]).
+    // quiet-service has no items, so landing anywhere else would show `cpu`
+    // instead of the empty state.
+    const { trigger } = setup();
+    fireEvent.click(trigger);
+    const filterInput = columns().groups.getByPlaceholderText(/Filter/);
+    fireEvent.keyDown(filterInput, { key: 'ArrowUp' });
+    fireEvent.keyDown(filterInput, { key: 'Enter' });
+    const { items } = columns();
+    assert.ok(items.getByText('No results'));
+  });
+
+  it('a filter that excludes the browsed service hides its items and blocks selecting it', () => {
+    const { trigger, onChange } = setup();
+    fireEvent.click(trigger);
+    fireEvent.click(columns().groups.getByText('checkout-service'));
+    assert.ok(columns().items.getByText('alloc_space'));
+
+    fireEvent.change(columns().groups.getByPlaceholderText(/Filter/), {
+      target: { value: 'billing' },
+    });
+    const { groups, items } = columns();
+    assert.ok(!groups.queryByText('checkout-service'));
+    assert.ok(!items.queryByText('alloc_space'));
+    assert.ok(!items.queryByText('cpu'));
+    assert.equal(onChange.mock.calls.length, 0);
+  });
+
+  it('selects a filter narrowed to exactly one match on Enter alone', () => {
+    const { trigger } = setup();
+    fireEvent.click(trigger);
+    const filterInput = columns().groups.getByPlaceholderText(/Filter/);
+    fireEvent.change(filterInput, { target: { value: 'billing' } });
+    fireEvent.keyDown(filterInput, { key: 'Enter' });
+    const { items } = columns();
+    assert.ok(items.getByText('cpu'));
+  });
+
+  it('shows an empty filter again the next time it opens', () => {
+    const { trigger } = setup();
+    fireEvent.click(trigger);
+    fireEvent.change(columns().groups.getByPlaceholderText(/Filter/), {
+      target: { value: 'checkout' },
+    });
+
+    fireEvent.click(trigger); // close
+    fireEvent.click(trigger); // reopen
+    assert.equal(
+      (columns().groups.getByPlaceholderText(/Filter/) as HTMLInputElement)
+        .value,
+      '',
+    );
+    assert.ok(columns().groups.getByText('billing-service'));
+  });
+});
