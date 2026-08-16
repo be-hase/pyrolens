@@ -74,7 +74,8 @@ const shutdownGrace = 25 * time.Second
 // makes is same-origin.
 const contentSecurityPolicy = "default-src 'self'; img-src 'self' data:; " +
 	"style-src 'self' 'unsafe-inline'; connect-src 'self'; " +
-	"frame-ancestors 'none'; base-uri 'none'; object-src 'none'"
+	"frame-ancestors 'none'; base-uri 'none'; object-src 'none'; " +
+	"form-action 'none'" // does not inherit from default-src; the SPA has no HTML form submits
 
 // securityHeaderWriter (re-)establishes pyrolens's security headers at the
 // moment a response is actually written, rather than once before the
@@ -111,6 +112,17 @@ func (w *securityHeaderWriter) WriteHeader(code int) {
 		h := w.ResponseWriter.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		// The URL is this app's state (tenant, label selectors, time range);
+		// no-referrer stops it leaking through Referer on any cross-origin
+		// navigation.
+		h.Set("Referrer-Policy", "no-referrer")
+		// Nothing else can hold a reference into this origin's window.
+		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		// Nothing else can load pyrolens's own responses as a subresource.
+		h.Set("Cross-Origin-Resource-Policy", "same-origin")
+		// The SPA uses none of these; deny them outright rather than leaving
+		// them to whatever the browser defaults to.
+		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 	}
 	w.ResponseWriter.WriteHeader(code)
 }
@@ -301,7 +313,11 @@ func (b *trailerStrippingBody) Read(p []byte) (int, error) {
 // authPass are empty when the operator configured no upstream credentials;
 // resolvePyroscopeAuth is what guarantees they are either both set or both
 // empty, so checking either one here is enough to know which case this is.
-func newProxy(target *url.URL, authUser, authPass string) *httputil.ReverseProxy {
+// tenantPin is empty unless -pyroscope-tenant-id/PYROSCOPE_TENANT_ID pins the
+// outbound tenant; resolveTenantControl guarantees it is never set alongside
+// an allowlist, so this and newHandler's allowlist check (see forward there)
+// never both apply.
+func newProxy(target *url.URL, authUser, authPass, tenantPin string) *httputil.ReverseProxy {
 	hasAuth := authUser != "" || authPass != ""
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	director := proxy.Director
@@ -337,6 +353,27 @@ func newProxy(target *url.URL, authUser, authPass string) *httputil.ReverseProxy
 			if vals, ok := req.Header[key]; ok {
 				out[key] = vals
 			}
+		}
+		// The UI sends at most one X-Scope-OrgID; forwarding whatever slice
+		// arrived is never our decision to make. Collapsing it to the single
+		// value Header.Get reports — the same read the allowlist gate below
+		// and dskit's own tenant resolution both use — is what keeps
+		// "forwarded" equal to "validated" in every configuration: a
+		// multi-valued header left as a slice could smuggle a second tenant
+		// past a check that only ever looked at the first value, in the gate
+		// here or in whatever reads it upstream. The empty-probe case is
+		// unaffected — Get on a single empty-string value still reports "".
+		if _, ok := req.Header[http.CanonicalHeaderKey("X-Scope-OrgID")]; ok {
+			out.Set("X-Scope-OrgID", req.Header.Get("X-Scope-OrgID"))
+		}
+		// A pinned tenant overwrites whatever the visitor sent, the
+		// deliberately-empty multitenancy probe included: this instance
+		// serves exactly one tenant, so nothing arriving on the wire gets a
+		// say in which one the upstream sees. The upstream then answers the
+		// (now non-empty) probe as single-tenant, which is correct for a
+		// pinned instance.
+		if tenantPin != "" {
+			out.Set("X-Scope-OrgID", tenantPin)
 		}
 		req.Header = out
 		// ReverseProxy clones the inbound request wholesale, Trailer field
@@ -425,7 +462,9 @@ func newProxy(target *url.URL, authUser, authPass string) *httputil.ReverseProxy
 // embedded UI, whose shell is `index`. gzipped holds the precompressed
 // variants keyed by their dist-relative path (gzipAssets), index.html's
 // entry included, so the shell and the on-disk files share one lookup.
-func newHandler(dist fs.FS, index []byte, gzipped map[string][]byte, proxy http.Handler) http.Handler {
+// allowedTenants is nil unless -allowed-tenants/ALLOWED_TENANTS configured
+// one; resolveTenantControl guarantees it is never set alongside a pin.
+func newHandler(dist fs.FS, index []byte, gzipped map[string][]byte, proxy http.Handler, allowedTenants map[string]bool) http.Handler {
 	fileServer := http.FileServer(http.FS(dist))
 
 	mux := http.NewServeMux()
@@ -443,6 +482,32 @@ func newHandler(dist fs.FS, index []byte, gzipped map[string][]byte, proxy http.
 	// traversal — an encoded "%2e%2e%2f" decodes into the method name and
 	// matches no route.
 	forward := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The allowlist gates the INBOUND header, so it has to run here,
+		// ahead of the proxy: the director rebuilds the outbound header set
+		// from scratch (see newProxy), and by then there is nothing left of
+		// the visitor's own value to check. An absent or empty header is let
+		// through untouched — that emptiness is client.ts's multitenancy
+		// probe, not a tenant selection, and the allowlist gates only
+		// non-empty values, the same distinction allowedRequestHeaders'
+		// comment draws for the header's presence.
+		if allowedTenants != nil {
+			// More than one X-Scope-OrgID line is malformed under a policy
+			// this strict — Get (below, and everywhere else that reads the
+			// header, dskit's own tenant resolution included) only ever sees
+			// the first, so checking that alone while a second value rides
+			// along unexamined is exactly the gap a checked-single/
+			// forwarded-many split would open. newProxy's director now
+			// collapses the outbound header to one value regardless, but the
+			// gate fails closed on its own rather than depending on that.
+			if len(r.Header.Values("X-Scope-OrgID")) > 1 {
+				http.Error(w, "tenant not allowed", http.StatusForbidden)
+				return
+			}
+			if tenant := r.Header.Get("X-Scope-OrgID"); tenant != "" && !allowedTenants[tenant] {
+				http.Error(w, "tenant not allowed", http.StatusForbidden)
+				return
+			}
+		}
 		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 		proxy.ServeHTTP(w, r)
 	})
@@ -685,6 +750,53 @@ func resolvePyroscopeAuth(target *url.URL, src pyroscopeAuthSources) (resolvedTa
 	return &stripped, user, pass, true, nil
 }
 
+// resolveTenantControl parses -pyroscope-tenant-id/-allowed-tenants (already
+// merged with their envs) into the pin newProxy's director overwrites
+// X-Scope-OrgID to, and the set newHandler's forward closure gates non-empty
+// inbound values against before forwarding. Pure and side-effect-free, like
+// resolvePyroscopeAuth, so main is the only Fatalf call site and every
+// combination here is table-testable.
+//
+// The two are mutually exclusive: a pin already fixes the outbound tenant to
+// one value regardless of what arrives, so an allowlist gating the visitor's
+// own header would have nothing left to check that the pin has not already
+// overridden — set together, one of them is silently dead, which is exactly
+// the kind of contradiction that deserves a startup Fatalf instead of a
+// guess about which one an operator meant.
+func resolveTenantControl(pinFlag, allowedFlag string) (pin string, allowed map[string]bool, err error) {
+	if pinFlag != "" && allowedFlag != "" {
+		return "", nil, fmt.Errorf("-pyroscope-tenant-id and -allowed-tenants are both set; only one tenant control can be active (a pin fixes the outbound tenant outright, an allowlist gates the visitor's own choice, and a pin leaves nothing for an allowlist to check)")
+	}
+	if pinFlag != "" {
+		// net/http trims leading/trailing whitespace off a header value when
+		// it goes out on the wire, so an untrimmed pin would forward (and be
+		// read back by the upstream) as a different string than what
+		// resolveTenantControl reports — and the access log, which logs this
+		// return value verbatim, would then disagree with what actually
+		// crossed the wire. A whitespace-ONLY pin is worse: it trims to "",
+		// which forwards as an EMPTY X-Scope-OrgID — the multitenancy probe,
+		// the exact opposite of pinning a tenant. Trimming here, once, keeps
+		// forwarding (newProxy) and logging (withAccessLog) looking at the
+		// same value, and turns the empty case into a startup error instead
+		// of a silently-unpinned instance.
+		pin = strings.TrimSpace(pinFlag)
+		if pin == "" {
+			return "", nil, fmt.Errorf("-pyroscope-tenant-id is whitespace only, which is not a usable tenant ID")
+		}
+		return pin, nil, nil
+	}
+	if allowedFlag == "" {
+		return "", nil, nil
+	}
+	allowed = make(map[string]bool)
+	for _, tenant := range strings.Split(allowedFlag, ",") {
+		if tenant = strings.TrimSpace(tenant); tenant != "" {
+			allowed[tenant] = true
+		}
+	}
+	return "", allowed, nil
+}
+
 // isLoopbackHost reports whether host — a URL's Host, which may include a
 // port — names localhost or a loopback address: the one case where plain
 // HTTP does not send whatever it carries across a network someone else can
@@ -764,7 +876,14 @@ func (w *statusWriter) Unwrap() http.ResponseWriter {
 // this server sees more than one tenant, so printing it would put one
 // tenant's query values in a log another operator might read. The path
 // alone carries no query data.
-func withAccessLog(next http.Handler) http.Handler {
+//
+// tenantPin, when set, is what gets logged for querier paths instead of the
+// inbound header: newProxy's director overwrites the outbound X-Scope-OrgID
+// to the pin on a request this same middleware sees before that rewrite
+// happens (the proxy clones the request rather than mutating this one), so
+// logging r.Header verbatim under a pin would record a visitor-supplied
+// value the pin already overrode rather than what the upstream actually saw.
+func withAccessLog(next http.Handler, tenantPin string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		sw := &statusWriter{ResponseWriter: w}
@@ -780,6 +899,9 @@ func withAccessLog(next http.Handler) http.Handler {
 		line := fmt.Sprintf("%s %s %d %s %dB", r.Method, r.URL.EscapedPath(), status, time.Since(start), sw.bytes)
 		if strings.HasPrefix(r.URL.Path, querierPrefix) {
 			tenant := r.Header.Get("X-Scope-OrgID")
+			if tenantPin != "" {
+				tenant = tenantPin
+			}
 			if tenant == "" {
 				tenant = "-"
 			}
@@ -798,6 +920,8 @@ type cliFlags struct {
 	pyroscopeUsername     *string
 	pyroscopePassword     *string
 	pyroscopePasswordFile *string
+	pyroscopeTenantID     *string
+	allowedTenants        *string
 	logRequests           *bool
 	showVersion           *bool
 }
@@ -817,6 +941,8 @@ func registerFlags(flagSet *flag.FlagSet) *cliFlags {
 		pyroscopeUsername:     flagSet.String("pyroscope-username", "", "basic auth username for the Pyroscope server, e.g. a Grafana Cloud stack ID (env: PYROSCOPE_USERNAME)"),
 		pyroscopePassword:     flagSet.String("pyroscope-password", "", "basic auth password for the Pyroscope server (env: PYROSCOPE_PASSWORD)"),
 		pyroscopePasswordFile: flagSet.String("pyroscope-password-file", envOr("PYROSCOPE_PASSWORD_FILE", ""), "path to a file holding the basic auth password, for mounted secrets; mutually exclusive with -pyroscope-password (env: PYROSCOPE_PASSWORD_FILE)"),
+		pyroscopeTenantID:     flagSet.String("pyroscope-tenant-id", envOr("PYROSCOPE_TENANT_ID", ""), "pin the outbound X-Scope-OrgID to this tenant on every request, overriding whatever the visitor sent; mutually exclusive with -allowed-tenants (env: PYROSCOPE_TENANT_ID)"),
+		allowedTenants:        flagSet.String("allowed-tenants", envOr("ALLOWED_TENANTS", ""), "comma-separated tenant IDs allowed through; a non-empty X-Scope-OrgID outside this list is rejected with 403 before it reaches Pyroscope, an absent or empty one (the multitenancy probe) always passes; mutually exclusive with -pyroscope-tenant-id (env: ALLOWED_TENANTS)"),
 		logRequests:           flagSet.Bool("log-requests", boolEnvOr("LOG_REQUESTS"), "log one line per request: method, path, status, duration, bytes (env: LOG_REQUESTS)"),
 		showVersion:           flagSet.Bool("version", false, "print the version and exit"),
 	}
@@ -874,6 +1000,11 @@ func main() {
 		log.Print("WARNING: " + warning)
 	}
 
+	tenantPin, allowedTenants, err := resolveTenantControl(*flags.pyroscopeTenantID, *flags.allowedTenants)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	dist, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		log.Fatal(err)
@@ -887,9 +1018,9 @@ func main() {
 	// to gain from redoing the work later.
 	gzipped := gzipAssets(dist)
 
-	handler := newHandler(dist, index, gzipped, newProxy(target, authUser, authPass))
+	handler := newHandler(dist, index, gzipped, newProxy(target, authUser, authPass, tenantPin), allowedTenants)
 	if *flags.logRequests {
-		handler = withAccessLog(handler)
+		handler = withAccessLog(handler, tenantPin)
 	}
 	server := &http.Server{
 		Addr:              *flags.listen,

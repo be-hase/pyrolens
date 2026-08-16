@@ -84,6 +84,8 @@ Flags / env of the server binary:
 | `-pyroscope-username`       | `PYROSCOPE_USERNAME`      | —                        | basic auth username for the Pyroscope server |
 | `-pyroscope-password`       | `PYROSCOPE_PASSWORD`      | —                        | basic auth password for the Pyroscope server |
 | `-pyroscope-password-file`  | `PYROSCOPE_PASSWORD_FILE` | —                        | path to a file holding the basic auth password (for a mounted secret); mutually exclusive with `-pyroscope-password` |
+| `-pyroscope-tenant-id`      | `PYROSCOPE_TENANT_ID`     | —                        | pin the outbound tenant to this ID on every request, overriding whatever the visitor sent; mutually exclusive with `-allowed-tenants` |
+| `-allowed-tenants`          | `ALLOWED_TENANTS`         | —                        | comma-separated tenant IDs to allow; a non-empty tenant outside this list is rejected with 403 before reaching Pyroscope; mutually exclusive with `-pyroscope-tenant-id` |
 | `-log-requests`             | `LOG_REQUESTS`            | `false`                  | log one line per request (method, path, status, duration, bytes, and the tenant header for querier calls) |
 | `-version`                  | —                         | —                        | print the version and exit |
 
@@ -153,6 +155,31 @@ PYROSCOPE_PASSWORD_FILE=/etc/pyrolens/token \
 This only authenticates pyrolens to Pyroscope. It does not authenticate
 visitors to pyrolens — see Security below.
 
+### Tenant control
+
+By default, the tenant switcher is not an isolation boundary — see Security
+below. `-pyroscope-tenant-id` and `-allowed-tenants` are an *optional*
+boundary for the two shapes that default deliberately isn't, and they are
+mutually exclusive (setting both refuses to start):
+
+- **`-pyroscope-tenant-id` (pin)** — for one Pyroscope tenant per pyrolens
+  instance. Every outbound request's `X-Scope-OrgID` is overwritten to this
+  exact value, including the UI's own deliberately-empty multitenancy probe,
+  so a visitor's `tenant` URL param can no longer choose a different tenant
+  no matter what it says.
+- **`-allowed-tenants` (allowlist)** — for one pyrolens instance shared across
+  several tenants, confined to a known subset. A request whose tenant is
+  non-empty and not in the comma-separated list is rejected with 403 before
+  it reaches Pyroscope; an absent or empty tenant (the multitenancy probe)
+  always passes through untouched.
+
+Neither authenticates the visitor — they constrain which tenant a request can
+reach, not who is allowed to send one. Put pyrolens behind whatever
+authenticates people, same as always; these flags are for bounding blast
+radius once they're in, and compose with upstream basic auth however a
+deployment needs (a pinned or allowlisted single-tenant Grafana Cloud stack,
+for instance).
+
 ### Security
 
 **Pyrolens performs no authentication or authorization.** Anyone who can
@@ -160,10 +187,12 @@ reach it can query everything the Pyroscope server behind it will answer, so
 put it somewhere only your team can reach and front it with whatever
 authenticates your other internal tools.
 
-**The tenant switcher is not an isolation boundary.** The tenant is a URL
-parameter that becomes the `X-Scope-OrgID` header, so a user can read any
-tenant by editing the address bar. Treat it as a convenience for people who
-are already allowed to see every tenant, not as a permission check.
+**The tenant switcher is not an isolation boundary, by default.** The tenant
+is a URL parameter that becomes the `X-Scope-OrgID` header, so without
+further configuration a user can read any tenant by editing the address bar.
+Treat it as a convenience for people who are already allowed to see every
+tenant, not as a permission check — unless `-pyroscope-tenant-id` or
+`-allowed-tenants` (see Tenant control above) is configured to bound it.
 
 **Headers are proxied through an explicit allowlist, in both directions.**
 The proxy does not transparently forward whatever headers arrived: a
