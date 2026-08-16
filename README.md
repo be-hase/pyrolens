@@ -20,9 +20,10 @@ full analysis experience into Grafana (Profiles Drilldown). This project
 brings the classic workflow back, plus a few things the old UI never had:
 
 - **Everything is in the URL.** Tenant, query, time ranges, comparison
-  selections, group-by label — copy the address bar and a teammate sees the
-  exact same screen. (The classic UI kept the tenant out of the URL, which
-  made sharing queries in multi-tenant setups painful.)
+  selections, group-by label, even the flame graph's search text and
+  sandwich selection — copy the address bar and a teammate sees the exact
+  same screen. (The classic UI kept the tenant out of the URL, which made
+  sharing queries in multi-tenant setups painful.)
 - **First-class multi-tenancy.** The tenant is a `tenant` URL param sent as
   `X-Scope-OrgID`; switch tenants from the nav bar. No per-tenant data
   sources to manage.
@@ -38,11 +39,15 @@ brings the classic workflow back, plus a few things the old UI never had:
   shows the time window it actually resolved to, marked "first half" /
   "second half" while it's still the implicit default; brushing or
   deep-linking a window adds a "Reset window" button back to that default.
+- **Grafana muscle memory.** `y` / `t a` / `t z` / `t ←` / `t →` keyboard
+  shortcuts, `t c` / `t v` copying time ranges to and from Grafana in its
+  own clipboard format, and an auto-refresh picker (`refresh=30s`, in the
+  URL like everything else).
 
 ## The views
 
 **Diff** — what got slower between two windows, ranked. Here an extra
-`slowRegression` frame shows up as `+33.57%`.
+`slowRegression` frame shows up as `+35.49%`.
 
 ![Diff view](docs/screenshots/diff-dark.png)
 
