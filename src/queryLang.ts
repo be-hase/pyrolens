@@ -30,6 +30,43 @@ function isProfileTypeLabel(label: string): boolean {
   return label === PROFILE_TYPE || label === PROFILE_TYPE_INTERNAL;
 }
 
+/**
+ * The single, shared read of the pseudo-label across a matcher list.
+ * `profile_type` and `__profile_type__` name the same underlying constraint,
+ * so the querier can honour only one value between them, and only through
+ * `=` — every other reader (`isMalformedQuery` / `malformedQueryReason`,
+ * `splitQuery`, `parseQuery`) computes this once and agrees by construction,
+ * rather than each re-deriving its own notion of "which value" and drifting
+ * apart the way `splitQuery` and `isMalformedQuery` once did.
+ *
+ * `unsupported` is true when the API cannot express what was asked: any
+ * pseudo-label matcher used an operator other than `=` (the querier takes a
+ * single profileTypeID, so `=~`/`!=`/`!~` can be neither sent nor honoured),
+ * two or more distinct `=` values were given (PromQL for "matches nothing" —
+ * sending either would misreport that as a real answer), or an `=` value was
+ * the empty string (the querier's profileTypeID can never be empty, so
+ * `profile_type=""` asks for something the API has no way to send — the same
+ * class of problem as `=~`). `value` is the one distinct `=` value when there
+ * is exactly one and nothing is unsupported, else null. A matcher list with
+ * no pseudo-label at all is unaffected: `unsupported` is false and `value` is
+ * null, the "nothing selected yet" state callers rely on.
+ */
+function assessProfileType(matchers: Matcher[]): {
+  unsupported: boolean;
+  value: string | null;
+} {
+  const values = new Set<string>();
+  let hasNonEquality = false;
+  for (const m of matchers) {
+    if (!isProfileTypeLabel(m.label)) continue;
+    if (m.op === '=') values.add(m.value);
+    else hasNonEquality = true;
+  }
+  const unsupported = hasNonEquality || values.size > 1 || values.has('');
+  const value = !unsupported && values.size === 1 ? [...values][0] : null;
+  return { unsupported, value };
+}
+
 // Parses `{name op "value", ...}` into matchers. Returns null when the input
 // is not a valid selector; an empty/blank string or `{}` parses to [].
 // Whitespace is tolerated everywhere between tokens. Values support the
@@ -137,29 +174,42 @@ function formatMatchers(matchers: Matcher[]): string {
 }
 
 /**
- * Splits a display query into what the querier API expects. The
- * `profile_type` (or `__profile_type__`) pseudo-matcher supplies
- * `profileTypeID` (last `=` matcher wins) and is removed from the returned
- * `labelSelector`, which is re-serialized in normalized form (`{}` when
- * nothing remains). Unparseable input yields `{ profileTypeID: '',
- * labelSelector: '{}' }` — callers gate API calls on a truthy profileTypeID.
+ * Why a query can't be used, or null when it can. 'syntax' covers input that
+ * does not parse at all; 'profileType' covers input that parses fine but
+ * asks something the API cannot express of the pseudo-label — see
+ * {@link assessProfileType}. Distinguishing the two lets a caller point the
+ * user at the actual problem instead of blaming syntax for a query that
+ * parsed.
  */
-/**
- * True when the query is non-empty but cannot be parsed, i.e. the user typed
- * something malformed rather than leaving the field blank.
- */
-export function isMalformedQuery(query: string): boolean {
-  if (query.trim() === '') return false;
+export function malformedQueryReason(
+  query: string,
+): 'syntax' | 'profileType' | null {
+  if (query.trim() === '') return null;
   const matchers = parseMatchers(query);
-  if (matchers === null) return true;
-  // A profile_type constraint the API cannot express is treated as malformed
-  // rather than dropped: the querier takes a single profileTypeID, so `=~` or
-  // `!=` on the pseudo-label can be neither sent nor honoured. Silently
-  // stripping it left the user's filter out of the request — or, when it was
-  // the only profile_type matcher, left the screen blank with no explanation.
-  return matchers.some((m) => isProfileTypeLabel(m.label) && m.op !== '=');
+  if (matchers === null) return 'syntax';
+  return assessProfileType(matchers).unsupported ? 'profileType' : null;
 }
 
+/**
+ * True when the query is non-empty but cannot be used as typed, i.e. the
+ * user typed something malformed rather than leaving the field blank. See
+ * {@link malformedQueryReason} for why.
+ */
+export function isMalformedQuery(query: string): boolean {
+  return malformedQueryReason(query) !== null;
+}
+
+/**
+ * Splits a display query into what the querier API expects. The
+ * `profile_type` (or `__profile_type__`) pseudo-matcher supplies
+ * `profileTypeID` and is removed from the returned `labelSelector`, which is
+ * re-serialized in normalized form (`{}` when nothing remains). Unparseable
+ * input, and input where the pseudo-label is unsupported (see
+ * {@link assessProfileType} — a non-`=` operator anywhere on it, or two or
+ * more distinct `=` values), yields `{ profileTypeID: '', labelSelector:
+ * '{}' }` — callers gate API calls on a truthy profileTypeID, so an
+ * unsupported constraint is never silently dropped from the request.
+ */
 export function splitQuery(query: string): {
   profileTypeID: string;
   labelSelector: string;
@@ -167,22 +217,19 @@ export function splitQuery(query: string): {
   const matchers = parseMatchers(query);
   if (!matchers) return { profileTypeID: '', labelSelector: '{}' };
 
-  let profileTypeID = '';
-  const rest: Matcher[] = [];
-  for (const m of matchers) {
-    if (isProfileTypeLabel(m.label)) {
-      if (m.op === '=') profileTypeID = m.value;
-    } else {
-      rest.push(m);
-    }
-  }
-  return { profileTypeID, labelSelector: formatMatchers(rest) };
+  const { value } = assessProfileType(matchers);
+  const rest = matchers.filter((m) => !isProfileTypeLabel(m.label));
+  return { profileTypeID: value ?? '', labelSelector: formatMatchers(rest) };
 }
 
 /**
  * Extracts the service / profile-type pair driving the cascade picker.
- * Returns null unless the query parses and contains `=` matchers for both
- * `service_name` and `profile_type` (last one wins for each).
+ * Returns null unless the query parses, `service_name` has at least one `=`
+ * matcher (last one wins, like any ordinary label), and the pseudo-label is
+ * supported with exactly one distinct `=` value (see
+ * {@link assessProfileType} — a non-`=` operator or conflicting values
+ * return null here too, so the picker never shows a value the query didn't
+ * unambiguously ask for).
  */
 export function parseQuery(
   query: string,
@@ -191,12 +238,10 @@ export function parseQuery(
   if (!matchers) return null;
 
   let service: string | null = null;
-  let profileType: string | null = null;
   for (const m of matchers) {
-    if (m.op !== '=') continue;
-    if (m.label === SERVICE_NAME) service = m.value;
-    else if (isProfileTypeLabel(m.label)) profileType = m.value;
+    if (m.op === '=' && m.label === SERVICE_NAME) service = m.value;
   }
+  const { value: profileType } = assessProfileType(matchers);
   if (service === null || profileType === null) return null;
   return { service, profileType };
 }

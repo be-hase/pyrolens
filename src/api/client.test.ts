@@ -122,6 +122,15 @@ describe('sortProfileTypes', () => {
     sortProfileTypes(input);
     assert.deepEqual(input, [MEM, CPU]);
   });
+
+  it('breaks a display-name tie deterministically by the full ID', () => {
+    // process_cpu and wall both label "cpu"; a stable sort alone would let
+    // the upstream Series order decide, so two servers (or two responses)
+    // could hand out a different default query.
+    const WALL = 'wall:cpu:nanoseconds:cpu:nanoseconds';
+    assert.deepEqual(sortProfileTypes([WALL, CPU]), [CPU, WALL]);
+    assert.deepEqual(sortProfileTypes([CPU, WALL]), [CPU, WALL]);
+  });
 });
 
 // --- transport ---------------------------------------------------------------
@@ -505,15 +514,34 @@ describe('fetchGroupedTimelines', () => {
     );
   });
 
-  it('collects series without the label under (none)', async () => {
+  it('maps series missing the group-by label to a null labelValue', async () => {
     reply = () =>
       json({
         series: [series({ pod: 'a' }, [[1000, 1]]), series({}, [[1000, 2]])],
       });
     assert.deepEqual(
       await fetchGroupedTimelines({ ...QUERY, step: 15, groupBy: 'region' }),
-      [{ labelValue: '(none)', points: [{ timestamp: 1000, value: 3 }] }],
+      [{ labelValue: null, points: [{ timestamp: 1000, value: 3 }] }],
     );
+  });
+
+  it('keeps a literal "(none)" value in its own bucket, not merged with missing', async () => {
+    reply = () =>
+      json({
+        series: [
+          series({ region: '(none)' }, [[1000, 5]]),
+          series({}, [[1000, 2]]),
+        ],
+      });
+    const grouped = await fetchGroupedTimelines({
+      ...QUERY,
+      step: 15,
+      groupBy: 'region',
+    });
+    assert.deepEqual(grouped, [
+      { labelValue: '(none)', points: [{ timestamp: 1000, value: 5 }] },
+      { labelValue: null, points: [{ timestamp: 1000, value: 2 }] },
+    ]);
   });
 
   it('returns every group, largest total first', async () => {

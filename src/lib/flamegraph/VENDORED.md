@@ -86,6 +86,30 @@ Diff mode (`valueRight` / `selfRight`, colour-by-diff, the diff tooltip and the
 Baseline/Comparison/Diff table columns) is upstream v13.0.1 functionality and is
 used by this project's Diff view.
 
+## Local fixes, deliberate deviations from upstream v13.0.1
+
+- **Zero-baseline diff guards.** Upstream's diff percentage/diff-percent math
+  (`FlameGraph/FlameGraphTooltip.tsx`'s `getDiffTooltipData`,
+  `TopTable/FlameGraphTopTableContainer.tsx`'s `buildTableRows`) divides by
+  `totalTicksLeft`/`totalTicksRight`/`percentageLeft` unconditionally, which is
+  `NaN`/`Infinity` whenever one side of a diff interval (baseline or
+  comparison) has zero total samples — the tooltip and table then rendered
+  literal "NaN%"/"Infinity%". Both places now treat a percentage over a zero
+  total as `0`, and a diff against a zero baseline as either `0` (comparison
+  also zero) or undefined (comparison nonzero — rendered `'n/a'` in the
+  tooltip; the table's existing `Infinity`/`-100` handling already renders
+  that case as an honest "new"/"removed" rather than the literal word). See
+  the guard comments at each site. `FlameGraph/colors.ts`'s
+  `getBarColorByDiff` already guarded this case pre-vendoring; it was the
+  reference for this fix.
+- **Clipboard fallback.** `FlameGraph/FlameGraphContextMenu.tsx`'s "Copy
+  function name" called `navigator.clipboard.writeText` directly. That API is
+  `undefined` outside a secure context (plain HTTP, which this project is
+  commonly deployed over as an internal tool), so the click threw and left
+  the menu stuck open. A local `copyText` helper now feature-detects and
+  falls back to a hidden-textarea + `document.execCommand('copy')`, and the
+  menu always closes after the attempt regardless of outcome.
+
 ## Re-syncing with upstream
 
 ```sh

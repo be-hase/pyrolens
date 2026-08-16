@@ -118,7 +118,7 @@ export function MultiTimeSeries({
       .map((s, i) => {
         const pt = s.points.find((p) => p.timestamp === at);
         return pt
-          ? { label: s.label, value: pt.value, color: SERIES_COLORS[i] }
+          ? { label: s.label, value: pt.value, color: SERIES_COLORS[i], i }
           : null;
       })
       .filter((r) => r !== null)
@@ -178,7 +178,12 @@ export function MultiTimeSeries({
             {paths.map((d, i) =>
               d ? (
                 <path
-                  key={series[i].label}
+                  // Keyed by position, not label: label is display text and
+                  // Tag Explorer can hand two series the same one (a
+                  // missing-label bucket and a literal "(none)" value both
+                  // read "(none)"). `series` is derived fresh each render
+                  // and never reordered in place, so the index is stable.
+                  key={i}
                   d={d}
                   fill="none"
                   stroke={SERIES_COLORS[i]}
@@ -234,7 +239,7 @@ export function MultiTimeSeries({
                 })()}
               </div>
               {hover.rows.map((r) => (
-                <div key={r.label} className="multi-timeseries-tooltip-row">
+                <div key={r.i} className="multi-timeseries-tooltip-row">
                   <span
                     className="multi-timeseries-chip"
                     style={{ background: r.color }}
@@ -253,7 +258,7 @@ export function MultiTimeSeries({
       </div>
       <div className="multi-timeseries-legend">
         {series.map((s, i) => (
-          <span key={s.label} className="multi-timeseries-legend-item">
+          <span key={i} className="multi-timeseries-legend-item">
             <span
               className="multi-timeseries-chip"
               style={{ background: SERIES_COLORS[i] }}
