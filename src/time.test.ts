@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import {
   formatMonthDay,
+  formatPaneWindow,
   formatRangeLabel,
   isRelative,
   resolveRange,
@@ -178,6 +179,56 @@ describe('formatRangeLabel', () => {
       formatRangeLabel('now-1h', String(end), { start, end }).endsWith(
         'Aug 7 08:00',
       ),
+    );
+  });
+});
+
+describe('formatPaneWindow', () => {
+  it('appends a compact duration to the absolute range', () => {
+    const start = new Date(2026, 0, 2, 9, 5, 0).getTime();
+    const end = new Date(2026, 0, 2, 9, 35, 0).getTime();
+    assert.equal(
+      formatPaneWindow({ start, end }),
+      'Jan 2 09:05 – Jan 2 09:35 (30m)',
+    );
+  });
+
+  it('shows the two largest nonzero units exactly, never rounding up', () => {
+    const start = 0;
+    // The default Comparison/Diff half of a 15-minute fixture window: a
+    // single rounded unit misreported this as "(8m)".
+    assert.equal(
+      formatPaneWindow({ start, end: start + 450_000 }).endsWith('(7m 30s)'),
+      true,
+    );
+    // A rounded single unit would have shown both of these as "(1h)"/"(2h)".
+    assert.equal(
+      formatPaneWindow({ start, end: start + 89 * 60_000 }).endsWith(
+        '(1h 29m)',
+      ),
+      true,
+    );
+    assert.equal(
+      formatPaneWindow({ start, end: start + 91 * 60_000 }).endsWith(
+        '(1h 31m)',
+      ),
+      true,
+    );
+    // A nonzero third unit is floored away, not rounded into the second.
+    assert.equal(
+      formatPaneWindow({ start, end: start + 5_445_000 }).endsWith('(1h 30m)'),
+      true,
+    );
+  });
+
+  it('carries exactly at a unit boundary, with no trailing zero unit', () => {
+    assert.equal(
+      formatPaneWindow({ start: 0, end: 60 * 60_000 }).endsWith('(1h)'),
+      true,
+    );
+    assert.equal(
+      formatPaneWindow({ start: 0, end: 24 * 3_600_000 }).endsWith('(1d)'),
+      true,
     );
   });
 });
