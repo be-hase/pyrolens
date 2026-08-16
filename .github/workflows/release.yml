@@ -33,22 +33,85 @@ jobs:
     needs: semver
     uses: ./.github/workflows/ci.yml
 
+  # Builds the UI on its own, with no write token: `contents: read` is the
+  # job default (see the workflow-level permissions above) and this job adds
+  # nothing to it. `yarn build`/vite run arbitrary package code (postinstall
+  # scripts, plugins, transitive deps), and that code has no business
+  # executing next to the `release` job's GITHUB_TOKEN
+  # (contents:write + packages:write) — a compromised dependency there could
+  # exfiltrate it or push its own commits/images. `dist/` crosses the job
+  # boundary as an artifact instead of being rebuilt inside `release`.
+  build-ui:
+    needs: semver
+    # Explicit even though it matches the workflow-level default (line 9):
+    # says outright, next to the job it protects, that this job never gets
+    # write access to anything.
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # This job only builds; it never needs to push. Leaving the
+          # token in .git/config would put it on disk right where
+          # yarn/vite — arbitrary package code — run next, which is
+          # exactly the exposure this job exists to avoid.
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - name: enable corepack
+        run: corepack enable
+      - name: install
+        run: yarn install --immutable
+      - name: build
+        run: yarn build
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ui-dist
+          path: dist/
+          # `//go:embed all:dist` deliberately includes dotfiles; the default
+          # (false) would silently drop any dotfile vite ever starts
+          # emitting (e.g. under public/) from the release while CI and
+          # `make build` still ship it.
+          include-hidden-files: true
+          # Long enough to re-run just the `release` job the next day
+          # without re-running `build-ui` — short because nothing outside
+          # this workflow run has a legitimate reason to fetch it.
+          retention-days: 7
+
   release:
-    needs: [semver, verify]
+    needs: [semver, verify, build-ui]
     permissions:
       contents: write # creates the GitHub Release
       packages: write # pushes images to ghcr.io
+      id-token: write # actions/attest-build-provenance: Sigstore OIDC signing
+      attestations: write # actions/attest-build-provenance: publish to this repo's attestations
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # goreleaser needs the full history for changelogs
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '24'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      # The UI now comes from build-ui, not a hook run in this job (see
+      # .goreleaser.yaml) — main.go's `//go:embed all:dist` still needs it
+      # on disk before any Go build (goreleaser's own, or the one inside
+      # `make build`-equivalent steps) runs.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ui-dist
+          path: dist/
+      - name: sanity-check the downloaded UI artifact
+        # A silently-empty or missing dist/ fails deep inside `go build`
+        # with a confusing "pattern all:dist: no matching files found"
+        # instead of pointing at the actual cause (the artifact handoff),
+        # so check it explicitly right after downloading.
+        run: test -f dist/index.html || { echo "dist/index.html missing after downloading the ui-dist artifact" >&2; exit 1; }
+      # goreleaser's sboms: step (.goreleaser.yaml) shells out to `syft`,
+      # which isn't preinstalled on the runner.
+      - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
       # The arm64 images are built on an amd64 runner.
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
@@ -65,3 +128,32 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Provenance for the archives: checksums.txt is "<digest>  <filename>"
+      # per line — every archive plus its SBOM, NOT the checksums file
+      # itself (verified against v2.17.1's actual output). The GitHub
+      # Release is still a draft at this point (.goreleaser.yaml), so these
+      # files exist but are not yet publicly downloadable — this attestation
+      # is guaranteed to land before anyone can fetch what it attests.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: .goreleaser-dist/checksums.txt
+      # Provenance for the pushed image: digests.txt (docker_digest in
+      # .goreleaser.yaml) is the same "<digest>  <name:tag>" shape, one line
+      # per image/manifest goreleaser pushed to ghcr.io. No equivalent gate
+      # here: `docker buildx build --push`, inside the goreleaser step
+      # above, already made the image public — this attestation follows
+      # moments later rather than gating it. See the README's Supply chain
+      # section, which documents this as the actual guarantee per artifact
+      # kind rather than promising publish-after-attest for both.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: .goreleaser-dist/digests.txt
+      # Last step, on purpose: undraft only now that the archive
+      # attestation above has actually been created, so a failure anywhere
+      # before this — including the attestation itself — leaves the release
+      # a draft instead of a public one missing its promised provenance.
+      - name: publish the release (was drafted so it could be attested first)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: gh release edit "$TAG" --draft=false

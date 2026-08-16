@@ -34,8 +34,14 @@ go build .   # only works after the line above
 ```
 
 This applies to `go vet` and `go test` too, since they compile the package.
-CI orders its steps this way and GoReleaser does it in a `before` hook — if
-you are adding a workflow or a script, do the same.
+CI orders its steps this way; `make build`/`make snapshot` do too. GoReleaser
+itself does **not** build the UI — vite/yarn run arbitrary package code, and
+that has no business executing next to a GITHUB_TOKEN with
+contents:write + packages:write. `release.yml`'s `build-ui` job (no write
+token) builds it and hands `dist/` to the token-bearing `release` job as an
+artifact instead. If you are adding a workflow or a script that invokes
+GoReleaser directly, build the UI yourself first — it will not do it for
+you.
 
 The reverse also bites: **GoReleaser's output directory must not be `dist/`**,
 or `--clean` deletes the UI mid-release. `.goreleaser.yaml` points it at
@@ -64,8 +70,9 @@ make snapshot       # exercise the release pipeline without publishing
 ```
 
 Releases are cut by pushing a `vX.Y.Z` tag: `.github/workflows/release.yml`
-validates the tag, re-runs CI against it, then hands off to GoReleaser for
-the binaries and the image.
+validates the tag, re-runs CI against it, builds the UI in a job with no
+write token, then hands the built `dist/` to the token-bearing `release` job,
+which runs GoReleaser for the binaries and the image.
 
 ## Where things live
 
@@ -314,7 +321,8 @@ Report honestly what you ran and what you did not.
   yarn 4 via corepack. **Node 25
   dropped corepack from the distribution**, so a bump past 24 has to install
   it first (`npm i -g corepack`) wherever `corepack enable` runs — CI, the
-  Dockerfile and the GoReleaser hooks. CI fails loudly if this is missed.
+  Dockerfile and release.yml's `build-ui` job. CI fails loudly if this is
+  missed.
 - TypeScript is strict with `erasableSyntaxOnly`, so **`enum` does not
   compile** — use `const X = {…} as const` with a matching type alias.
 - Prettier and eslint are CI gates (single quotes, semicolons, trailing

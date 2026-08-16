@@ -263,6 +263,30 @@ docker run -p 4040:4040 grafana/pyroscope
 docker run -p 4040:4040 grafana/pyroscope -auth.multitenancy-enabled
 ```
 
+## Supply chain
+
+Container base images (`Dockerfile`, `Dockerfile.release`) are pinned to a
+digest alongside their tag (`node:24-alpine@sha256:...`), so a rebuild of the
+same commit can't silently pick up different base-image bytes; Renovate
+(`docker:pinDigests`) keeps those digests current.
+
+Every release (binaries and the `ghcr.io/be-hase/pyrolens` image) ships with
+a Syft-generated SBOM for each archive and a
+[build provenance attestation](https://github.com/actions/attest-build-provenance)
+for both the archives and the image, produced in CI from the tag build. The
+guarantee differs slightly by artifact, because only one of them can be held
+back until it's attested: the GitHub Release is created as a draft and only
+published once the archives (and their SBOMs) are attested, so nothing there
+is downloadable before its attestation exists; the image is pushed to GHCR
+as part of the same GoReleaser run and is public moments before its own
+attestation lands, since there is no equivalent "draft" state for an OCI
+registry push. Verify either with the `gh` CLI:
+
+```sh
+gh attestation verify oci://ghcr.io/be-hase/pyrolens:<tag> --owner be-hase
+gh attestation verify pyrolens_<version>_linux_amd64.tar.gz --owner be-hase
+```
+
 ## License
 
 Pyrolens is licensed **Apache-2.0** (see `LICENSE`). Bundled third-party

@@ -8,13 +8,18 @@
 
 services:
   # Multi-tenant: the UI asks for a tenant and sends it as X-Scope-OrgID.
+  #
+  # Digest pinned alongside the tag (see Dockerfile) even though this compose
+  # file is dev-only: it keeps `docker compose pull` reproducible and gives
+  # Renovate (docker:pinDigests, renovate.json5) one consistent pattern to
+  # maintain everywhere.
   pyroscope:
-    image: grafana/pyroscope:2.2.1
+    image: grafana/pyroscope:2.2.1@sha256:70cf34fcb09d286080df909c33a95432df2a78ed4f6613b5e998ac17f90e4c3d
     command: ['-auth.multitenancy-enabled']
     ports: ['4040:4040']
 
   loadgen-a:
-    image: golang:1.26-alpine
+    image: golang:1.26-alpine@sha256:70b46548e42db77e0966aaf3619fd068734dc6c77584d526b91126504fd95816
     working_dir: /src
     volumes:
       - ./loadgen:/src:ro
@@ -27,7 +32,7 @@ services:
     depends_on: [pyroscope]
 
   loadgen-b:
-    image: golang:1.26-alpine
+    image: golang:1.26-alpine@sha256:70b46548e42db77e0966aaf3619fd068734dc6c77584d526b91126504fd95816
     working_dir: /src
     volumes:
       - ./loadgen:/src:ro
@@ -41,12 +46,12 @@ services:
 
   # Single-tenant: no tenant UI at all. Opt in with `--profile single`.
   pyroscope-single:
-    image: grafana/pyroscope:2.2.1
+    image: grafana/pyroscope:2.2.1@sha256:70cf34fcb09d286080df909c33a95432df2a78ed4f6613b5e998ac17f90e4c3d
     ports: ['4045:4040']
     profiles: ['single']
 
   loadgen-single:
-    image: golang:1.26-alpine
+    image: golang:1.26-alpine@sha256:70b46548e42db77e0966aaf3619fd068734dc6c77584d526b91126504fd95816
     working_dir: /src
     volumes:
       - ./loadgen:/src:ro

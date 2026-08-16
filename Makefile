@@ -23,7 +23,13 @@ docker:
 release-check:
 	goreleaser check
 
-snapshot:
+# `build`, not just its `yarn build` line: GoReleaser no longer builds the UI
+# itself (that moved to release.yml's build-ui job, off the token-bearing
+# release job — see .goreleaser.yaml), so this has to exist before goreleaser
+# runs, or it fails deep in the Go build with "pattern all:dist: no matching
+# files found" — or worse, silently archives a stale dist/ left over from an
+# earlier build.
+snapshot: build
 	goreleaser release --snapshot --clean --skip=docker
 
 clean:

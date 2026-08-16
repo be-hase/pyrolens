@@ -1,6 +1,12 @@
 {
   $schema: 'https://docs.renovatebot.com/renovate-schema.json',
-  extends: ['config:recommended'],
+  // docker:pinDigests keeps the `@sha256:...` pin on every FROM (Dockerfile,
+  // Dockerfile.release, dev/compose.yaml) in step with the tag, so the base
+  // images stay reproducible without hand-updating digests on every bump.
+  // Note: a digest-only re-push of the same tag (no version bump) may not
+  // carry an age minimumReleaseAge can gate on — it delays new tags, not
+  // necessarily every digest change behind an unchanged one.
+  extends: ['config:recommended', 'docker:pinDigests'],
   automerge: true,
   major: {
     automerge: false,
