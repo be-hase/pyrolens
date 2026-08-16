@@ -83,6 +83,13 @@ const server = createServer(async (req, res) => {
     step: request.step ?? null,
     name: request.name ?? null,
     limit: request.limit ?? null,
+    // SelectMergeStacktraces carries maxNodes at the top level; Diff nests
+    // it inside each side's query object instead (see the wire-shape
+    // comment in src/api/client.ts), so both are logged separately rather
+    // than folding them into one field that could hide a placement bug.
+    maxNodes: request.maxNodes ?? null,
+    leftMaxNodes: request.left?.maxNodes ?? null,
+    rightMaxNodes: request.right?.maxNodes ?? null,
   });
 
   // The tenancy probe: an empty org id is what the UI sends to find out

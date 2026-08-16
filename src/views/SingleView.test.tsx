@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import assert from 'node:assert/strict';
-import { beforeEach, describe, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import { fetchFlamegraph, fetchTimeline } from '@api/client';
 import { SingleView } from './SingleView.tsx';
 import type { ViewProps } from '../App.tsx';
@@ -46,6 +46,26 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', StubResizeObserver);
   timelineOf.mockResolvedValue([]);
   flamegraphOf.mockResolvedValue({ names: [], levels: [] });
+});
+
+// SingleView reads maxNodes straight off the URL (useRoute()), the same way
+// App.test.tsx drives routing — set the URL before rendering, not through a
+// prop, and put it back so no other test in this file inherits it.
+const at = (url: string) => window.history.replaceState(null, '', url);
+
+describe('SingleView maxNodes wiring', () => {
+  afterEach(() => {
+    at('/');
+  });
+
+  it('passes a deep-linked maxNodes through to fetchFlamegraph', async () => {
+    at('/?maxNodes=500');
+    render(<SingleView {...PROPS} />);
+    await waitFor(() => assert.equal(flamegraphOf.mock.calls.length, 1));
+    // Second positional arg after the query params — see fetchFlamegraph's
+    // signature in src/api/client.ts.
+    assert.equal(flamegraphOf.mock.calls[0][1], 500);
+  });
 });
 
 describe('SingleView retry wiring', () => {

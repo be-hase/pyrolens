@@ -4,7 +4,7 @@ import { ControlsBar } from '@components/ControlsBar';
 import { Panel } from '@components/Panel';
 import { Button } from '@components/core/Button';
 import { Empty } from '@components/core/Empty';
-import { profileTypeUnit } from '@api/client';
+import { parseMaxNodes, profileTypeUnit } from '@api/client';
 import { FlameGraph as GrafanaFlameGraph } from '@lib/flamegraph';
 import {
   diffFlamebearerToDataFrame,
@@ -13,7 +13,7 @@ import {
 import { useDiffFlamegraph } from '@hooks/useProfileData';
 import { useFlameGraphUrlState } from '@hooks/useFlameGraphUrlState';
 import { splitQuery } from '../queryLang';
-import { navigate } from '../urlState';
+import { navigate, useRoute } from '../urlState';
 import { ComparisonPane, ErrorBanner } from './ComparisonPane';
 import { swappedPaneParams, useComparisonParams } from './comparisonParams';
 
@@ -42,6 +42,8 @@ export function DiffView({
   // documents the params as global.
   const { search, onSearchChange, sandwichItem, onSandwichChange } =
     useFlameGraphUrlState();
+  const { params } = useRoute();
+  const maxNodes = parseMaxNodes(params.get('maxNodes'));
 
   const { diff, loading, error, retry } = useDiffFlamegraph({
     leftQuery: left.query,
@@ -49,6 +51,7 @@ export function DiffView({
     leftRange: left.range,
     rightRange: right.range,
     tenantID,
+    maxNodes,
   });
 
   const unit = grafanaUnit(

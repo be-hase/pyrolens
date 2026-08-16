@@ -89,6 +89,76 @@ test('the single view asks for exactly the profile the URL names', async ({
   }
 });
 
+test('a deep-linked maxNodes reaches the upstream request on every view', async ({
+  page,
+}) => {
+  // Single: maxNodes is a top-level field on SelectMergeStacktraces.
+  await page.goto(url('/', { maxNodes: 500 }));
+  await expect
+    .poll(async () => {
+      const stacktraces = (await upstreamLog(page)).filter(
+        (entry) => entry.method === 'SelectMergeStacktraces',
+      );
+      // .every() on an empty array is vacuously true, so the length check
+      // is load-bearing: without it this would pass before any request
+      // had actually landed.
+      return (
+        stacktraces.length > 0 &&
+        stacktraces.every((entry) => entry.maxNodes === 500)
+      );
+    })
+    .toBe(true);
+
+  // Comparison: both panes fetch independently, so both must carry it.
+  await clearUpstreamLog(page);
+  await page.goto(
+    url('/comparison', {
+      maxNodes: 500,
+      leftFrom: meta.left.start,
+      leftUntil: meta.left.end,
+      rightFrom: meta.right.start,
+      rightUntil: meta.right.end,
+    }),
+  );
+  await expect
+    .poll(async () => {
+      const stacktraces = (await upstreamLog(page)).filter(
+        (entry) => entry.method === 'SelectMergeStacktraces',
+      );
+      return (
+        stacktraces.length >= 2 &&
+        stacktraces.every((entry) => entry.maxNodes === 500)
+      );
+    })
+    .toBe(true);
+
+  // Diff: maxNodes is nested inside each side's query object, not on the
+  // outer envelope — assert both sides carry it, not just one.
+  await clearUpstreamLog(page);
+  await page.goto(
+    url('/diff', {
+      maxNodes: 500,
+      leftFrom: meta.left.start,
+      leftUntil: meta.left.end,
+      rightFrom: meta.right.start,
+      rightUntil: meta.right.end,
+    }),
+  );
+  await expect
+    .poll(async () => {
+      const diffCalls = (await upstreamLog(page)).filter(
+        (entry) => entry.method === 'Diff',
+      );
+      return (
+        diffCalls.length > 0 &&
+        diffCalls.every(
+          (entry) => entry.leftMaxNodes === 500 && entry.rightMaxNodes === 500,
+        )
+      );
+    })
+    .toBe(true);
+});
+
 test('the comparison view renders both panes', async ({ page }) => {
   await page.goto(
     url('/comparison', {

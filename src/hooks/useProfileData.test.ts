@@ -51,13 +51,14 @@ describe('useFlamegraph', () => {
   it('fetches the split query for the range', async () => {
     renderHook(() => useFlamegraph({ query: QUERY, range: RANGE }));
     await waitFor(() => assert.equal(flamegraphOf.mock.calls.length, 1));
-    const [params, signal] = flamegraphOf.mock.calls[0];
+    const [params, maxNodes, signal] = flamegraphOf.mock.calls[0];
     assert.deepEqual(params, {
       profileTypeID: CPU,
       labelSelector: '{service_name="web"}',
       start: RANGE.start,
       end: RANGE.end,
     });
+    assert.equal(maxNodes, undefined);
     assert.ok(signal instanceof AbortSignal);
   });
 
@@ -221,7 +222,7 @@ describe('useFlamegraph', () => {
       { initialProps: { query: QUERY } },
     );
     await waitFor(() => assert.equal(flamegraphOf.mock.calls.length, 1));
-    const signal = flamegraphOf.mock.calls[0][1];
+    const signal = flamegraphOf.mock.calls[0][2];
     rerender({ query: OTHER });
     assert.equal(signal?.aborted, true);
   });
@@ -231,7 +232,7 @@ describe('useFlamegraph', () => {
       useFlamegraph({ query: QUERY, range: RANGE }),
     );
     await waitFor(() => assert.equal(flamegraphOf.mock.calls.length, 1));
-    const signal = flamegraphOf.mock.calls[0][1];
+    const signal = flamegraphOf.mock.calls[0][2];
     unmount();
     assert.equal(signal?.aborted, true);
   });
@@ -244,6 +245,22 @@ describe('useFlamegraph', () => {
     await waitFor(() => assert.equal(flamegraphOf.mock.calls.length, 1));
     rerender({ tenantID: 'team-b' });
     await waitFor(() => assert.equal(flamegraphOf.mock.calls.length, 2));
+  });
+
+  it('refetches when maxNodes changes, and sends it through', async () => {
+    const { rerender } = renderHook(
+      ({ maxNodes }) => useFlamegraph({ query: QUERY, range: RANGE, maxNodes }),
+      { initialProps: { maxNodes: undefined as number | undefined } },
+    );
+    await waitFor(() => assert.equal(flamegraphOf.mock.calls.length, 1));
+    assert.equal(flamegraphOf.mock.calls[0][1], undefined);
+
+    rerender({ maxNodes: 500 });
+    // This assertion fails if maxNodes is left out of useFetched's deps
+    // array — the hook would treat the two calls as the same key and never
+    // re-run the fetch.
+    await waitFor(() => assert.equal(flamegraphOf.mock.calls.length, 2));
+    assert.equal(flamegraphOf.mock.calls[1][1], 500);
   });
 
   it('does not refetch when nothing it queries on changed', async () => {
@@ -355,7 +372,7 @@ describe('useDiffFlamegraph', () => {
       }),
     );
     await waitFor(() => assert.equal(diffOf.mock.calls.length, 1));
-    const [left, right, signal] = diffOf.mock.calls[0];
+    const [left, right, maxNodes, signal] = diffOf.mock.calls[0];
     assert.deepEqual(left, {
       profileTypeID: CPU,
       labelSelector: '{service_name="web"}',
@@ -368,10 +385,32 @@ describe('useDiffFlamegraph', () => {
       start: RIGHT_RANGE.start,
       end: RIGHT_RANGE.end,
     });
+    assert.equal(maxNodes, undefined);
     assert.ok(signal instanceof AbortSignal);
     await waitFor(() =>
       assert.deepEqual(result.current.diff?.names, ['total']),
     );
+  });
+
+  it('refetches when maxNodes changes, and sends it through', async () => {
+    const { rerender } = renderHook(
+      ({ maxNodes }) =>
+        useDiffFlamegraph({
+          leftQuery: QUERY,
+          rightQuery: OTHER,
+          leftRange: LEFT_RANGE,
+          rightRange: RIGHT_RANGE,
+          maxNodes,
+        }),
+      { initialProps: { maxNodes: undefined as number | undefined } },
+    );
+    await waitFor(() => assert.equal(diffOf.mock.calls.length, 1));
+
+    rerender({ maxNodes: 500 });
+    // Fails if maxNodes is left out of useFetched's deps array — the two
+    // renders would collapse into the same key and never refetch.
+    await waitFor(() => assert.equal(diffOf.mock.calls.length, 2));
+    assert.equal(diffOf.mock.calls[1][2], 500);
   });
 
   it('explains a malformed pane query instead of fetching', () => {

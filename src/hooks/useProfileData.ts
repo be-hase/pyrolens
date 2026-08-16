@@ -51,7 +51,14 @@ export function useFlamegraph({
   range,
   tenantID,
   enabled = true,
-}: FetchOpts): {
+  maxNodes,
+}: FetchOpts & {
+  // Kept off the shared FetchOpts on purpose: useTimeline takes the same
+  // interface, and SelectSeries (the RPC behind it) has no maxNodes field —
+  // sharing the property there would type-check and silently do nothing.
+  /** Caps the node count per flamegraph query; server default when unset. */
+  maxNodes?: number;
+}): {
   flamegraph: FlamegraphData;
   loading: boolean;
   error: string | null;
@@ -68,8 +75,15 @@ export function useFlamegraph({
     EMPTY,
     active,
     (signal) =>
-      fetchFlamegraph({ profileTypeID, labelSelector, start, end }, signal),
-    [profileTypeID, labelSelector, start, end, tenantID],
+      fetchFlamegraph(
+        { profileTypeID, labelSelector, start, end },
+        maxNodes,
+        signal,
+      ),
+    // maxNodes must be in this list, same as every other value `load` reads:
+    // otherwise changing it (a deep-linked maxNodes edited in place) would
+    // leave the flamegraph pinned to whatever the first fetch used.
+    [profileTypeID, labelSelector, start, end, tenantID, maxNodes],
   );
 
   const malformed = malformedMessage(query);
@@ -134,12 +148,18 @@ export function useDiffFlamegraph({
   leftRange,
   rightRange,
   tenantID,
+  maxNodes,
 }: {
   leftQuery: string;
   rightQuery: string;
   leftRange: TimeRange;
   rightRange: TimeRange;
   tenantID?: string;
+  // This hook has its own opts type rather than FetchOpts (it takes two
+  // queries and two ranges), so maxNodes living here needs no exclusion —
+  // see useFlamegraph's comment for why it's kept off the shared interface.
+  /** Caps the node count per side; server default when unset. */
+  maxNodes?: number;
 }): {
   diff: DiffFlamegraphData | null;
   loading: boolean;
@@ -168,8 +188,10 @@ export function useDiffFlamegraph({
             start: rightRange.start,
             end: rightRange.end,
           },
+          maxNodes,
           signal,
         ),
+      // maxNodes must be in this list — see useFlamegraph's identical note.
       [
         left.profileTypeID,
         left.labelSelector,
@@ -180,6 +202,7 @@ export function useDiffFlamegraph({
         rightRange.start,
         rightRange.end,
         tenantID,
+        maxNodes,
       ],
     );
 
