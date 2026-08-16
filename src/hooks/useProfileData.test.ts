@@ -7,6 +7,7 @@ import {
   fetchTimeline,
 } from '@api/client';
 import {
+  PROFILE_TYPE_MESSAGE,
   useDiffFlamegraph,
   useFlamegraph,
   useTimeline,
@@ -90,6 +91,35 @@ describe('useFlamegraph', () => {
       useFlamegraph({ query: '{unclosed="a"', range: RANGE }),
     );
     assert.match(result.current.error ?? '', /Could not parse the query/);
+    assert.equal(result.current.loading, false);
+    assert.equal(flamegraphOf.mock.calls.length, 0);
+  });
+
+  it('explains a conflicting profile_type instead of fetching', () => {
+    // {profile_type="a", profile_type="b"} parses fine, so this must not
+    // reuse the syntax message — the query is fine, the constraint isn't.
+    const { result } = renderHook(() =>
+      useFlamegraph({
+        query: '{service_name="s", profile_type="a", profile_type="b"}',
+        range: RANGE,
+      }),
+    );
+    assert.equal(result.current.error, PROFILE_TYPE_MESSAGE);
+    assert.equal(result.current.loading, false);
+    assert.equal(flamegraphOf.mock.calls.length, 0);
+  });
+
+  it('explains an explicit empty profile_type instead of fetching', () => {
+    // profile_type="" parses fine and is a single distinct = value, so
+    // without the fix this read as usable, profileTypeID came back falsy,
+    // and the panel sat empty with no message explaining why.
+    const { result } = renderHook(() =>
+      useFlamegraph({
+        query: '{service_name="s", profile_type=""}',
+        range: RANGE,
+      }),
+    );
+    assert.equal(result.current.error, PROFILE_TYPE_MESSAGE);
     assert.equal(result.current.loading, false);
     assert.equal(flamegraphOf.mock.calls.length, 0);
   });

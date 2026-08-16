@@ -166,11 +166,30 @@ export const getDiffTooltipData = (
   const totalTicksLeft = totalTicks - totalTicksRight;
   const valueLeft = item.value - item.valueRight!;
 
-  const percentageLeft = Math.round((10000 * valueLeft) / totalTicksLeft) / 100;
+  // Deviates from upstream: upstream divides by totalTicksLeft/totalTicksRight
+  // unconditionally, which is NaN when that side of the diff interval has no
+  // samples at all (e.g. an empty baseline time range). A percentage over a
+  // zero total is defined as 0 instead.
+  const percentageLeft =
+    totalTicksLeft === 0
+      ? 0
+      : Math.round((10000 * valueLeft) / totalTicksLeft) / 100;
   const percentageRight =
-    Math.round((10000 * item.valueRight!) / totalTicksRight) / 100;
+    totalTicksRight === 0
+      ? 0
+      : Math.round((10000 * item.valueRight!) / totalTicksRight) / 100;
 
-  const diff = ((percentageRight - percentageLeft) / percentageLeft) * 100;
+  // Deviates from upstream: upstream computes
+  // ((percentageRight - percentageLeft) / percentageLeft) * 100 unconditionally,
+  // which divides by zero whenever the baseline percentage is 0. Two zero
+  // percentages is a real, well-defined 0 diff; a zero baseline against a
+  // nonzero comparison has no defined percent change, so that case is left
+  // undefined here and rendered as 'n/a' below instead of "Infinity%".
+  const diffDefined = !(percentageLeft === 0 && percentageRight !== 0);
+  const diff =
+    percentageLeft === 0
+      ? 0
+      : ((percentageRight - percentageLeft) / percentageLeft) * 100;
 
   const displayValueLeft = getValueWithUnit(
     data,
@@ -189,7 +208,7 @@ export const getDiffTooltipData = (
       label: '% of total',
       baseline: percentageLeft + '%',
       comparison: percentageRight + '%',
-      diff: formatWithSuffix(diff, shortValFormat) + '%',
+      diff: diffDefined ? formatWithSuffix(diff, shortValFormat) + '%' : 'n/a',
     },
     {
       rowId: '2',

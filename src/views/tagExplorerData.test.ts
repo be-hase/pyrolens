@@ -99,6 +99,27 @@ describe('summarize', () => {
       before,
     );
   });
+
+  it('defaults value to the label when the input has none', () => {
+    const rows = summarize([series('us-east', [1])]);
+    assert.equal(rows[0].value, 'us-east');
+  });
+
+  it('preserves a null value through ranking, distinct from a same-looking label', () => {
+    // The Tag Explorer's placeholder for a missing label and a literal
+    // "(none)" value both display the same; only `value` tells them apart.
+    const rows = summarize([
+      { ...series('(none)', [10]), value: '(none)' },
+      { ...series('(none)', [5]), value: null },
+    ]);
+    assert.deepEqual(
+      rows.map((r) => [r.label, r.value]),
+      [
+        ['(none)', '(none)'],
+        ['(none)', null],
+      ],
+    );
+  });
 });
 
 describe('groupByLabels', () => {

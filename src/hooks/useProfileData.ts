@@ -6,7 +6,7 @@ import {
   type FlamegraphData,
   type Point,
 } from '@api/client';
-import { isMalformedQuery, splitQuery } from '../queryLang';
+import { malformedQueryReason, splitQuery } from '../queryLang';
 import { timelineStep, type TimeRange } from '../time';
 import { useFetched } from './useFetched';
 
@@ -15,6 +15,28 @@ const EMPTY: FlamegraphData = { names: [], levels: [] };
 export const MALFORMED_MESSAGE =
   'Could not parse the query. Expected a selector like ' +
   '{service_name="my-service", profile_type="..."}.';
+
+export const PROFILE_TYPE_MESSAGE =
+  'profile_type needs exactly one "=" matcher with a non-empty value. ' +
+  'Remove the conflicting, empty, or regex/negated profile_type matchers ' +
+  'and keep a single profile_type="...".';
+
+/**
+ * Maps a query to the message a hook should show for it, or null when the
+ * query is usable (blank or parses with a supported pseudo-label). Kept as
+ * one function so `useFlamegraph`, `useTimeline` and `useDiffFlamegraph`
+ * cannot pick different wording for the same {@link malformedQueryReason}.
+ */
+export function malformedMessage(query: string): string | null {
+  switch (malformedQueryReason(query)) {
+    case 'syntax':
+      return MALFORMED_MESSAGE;
+    case 'profileType':
+      return PROFILE_TYPE_MESSAGE;
+    case null:
+      return null;
+  }
+}
 
 interface FetchOpts {
   query: string;
@@ -52,11 +74,7 @@ export function useFlamegraph({
   return {
     flamegraph: data,
     loading: active && fetching,
-    error: isMalformedQuery(query)
-      ? MALFORMED_MESSAGE
-      : active
-        ? fetchError
-        : null,
+    error: malformedMessage(query) ?? (active ? fetchError : null),
   };
 }
 
@@ -90,11 +108,7 @@ export function useTimeline({
   return {
     timeline: data,
     loading: active && fetching,
-    error: isMalformedQuery(query)
-      ? MALFORMED_MESSAGE
-      : active
-        ? fetchError
-        : null,
+    error: malformedMessage(query) ?? (active ? fetchError : null),
   };
 }
 
@@ -154,11 +168,11 @@ export function useDiffFlamegraph({
   return {
     diff: data,
     loading: active && fetching,
+    // First non-null wins: whichever pane is broken, the message names the
+    // real problem instead of always blaming the left pane.
     error:
-      isMalformedQuery(leftQuery) || isMalformedQuery(rightQuery)
-        ? MALFORMED_MESSAGE
-        : active
-          ? fetchError
-          : null,
+      malformedMessage(leftQuery) ??
+      malformedMessage(rightQuery) ??
+      (active ? fetchError : null),
   };
 }

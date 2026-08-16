@@ -6,6 +6,7 @@ import {
   isInternalLabel,
   isMalformedQuery,
   isValidLabelName,
+  malformedQueryReason,
   parseQuery,
   splitQuery,
   toDisplayLabel,
@@ -59,11 +60,21 @@ describe('splitQuery', () => {
     );
   });
 
-  it('lets the last profile_type= matcher win', () => {
+  it('dedupes identical profile_type= matchers, keeping the value', () => {
+    const { profileTypeID } = splitQuery(
+      `{profile_type="${CPU}", profile_type="${CPU}"}`,
+    );
+    assert.equal(profileTypeID, CPU);
+  });
+
+  it('drops the profileTypeID when profile_type= matchers disagree', () => {
+    // {profile_type="cpu", profile_type="memory"} matches nothing under
+    // PromQL semantics; sending either value would misreport that as real
+    // data, so the pseudo-label collapses to no ID rather than "last wins".
     const { profileTypeID } = splitQuery(
       `{profile_type="${CPU}", profile_type="${MEM}"}`,
     );
-    assert.equal(profileTypeID, MEM);
+    assert.equal(profileTypeID, '');
   });
 
   it('tolerates arbitrary whitespace', () => {
@@ -143,6 +154,17 @@ describe('splitQuery', () => {
       labelSelector: '{region="eu"}',
     });
   });
+
+  it('drops the profileTypeID when an = matcher mixes with a non-= one', () => {
+    // {profile_type="A", profile_type=~"B.*"} is unsatisfiable-or-ambiguous
+    // the same way two conflicting = values are: sending "A" alone would
+    // silently drop the =~ constraint while still returning data, which is
+    // worse than sending nothing.
+    assert.deepEqual(
+      splitQuery(`{profile_type="${CPU}", profile_type=~"mem.*"}`),
+      { profileTypeID: '', labelSelector: '{}' },
+    );
+  });
 });
 
 describe('parseQuery', () => {
@@ -201,12 +223,31 @@ describe('parseQuery', () => {
     assert.equal(parseQuery('nonsense{'), null);
   });
 
-  it('lets the last equality matcher win for each field', () => {
+  it('lets the last equality matcher win for service_name, an ordinary label', () => {
     assert.deepEqual(
+      parseQuery(`{service_name="a", service_name="b", profile_type="${CPU}"}`),
+      { service: 'b', profileType: CPU },
+    );
+  });
+
+  it('returns null when profile_type= matchers disagree, rather than picking the last', () => {
+    // Unlike service_name, the pseudo-label cannot use "last one wins": the
+    // cascade picker would display a value the query never unambiguously
+    // asked for, while the request the query maps to is unfetchable.
+    assert.equal(
       parseQuery(
-        `{service_name="a", service_name="b", profile_type="${CPU}", profile_type="${MEM}"}`,
+        `{service_name="a", profile_type="${CPU}", profile_type="${MEM}"}`,
       ),
-      { service: 'b', profileType: MEM },
+      null,
+    );
+  });
+
+  it('returns null when a non-equality matcher joins an equality one on the pseudo-label', () => {
+    assert.equal(
+      parseQuery(
+        `{service_name="a", profile_type="${CPU}", profile_type=~"mem.*"}`,
+      ),
+      null,
     );
   });
 });
@@ -458,5 +499,111 @@ describe('isMalformedQuery', () => {
       isMalformedQuery('{service_name="a", profile_type="cpu:a:b:c:d"}'),
       false,
     );
+  });
+
+  it('rejects conflicting profile_type= matchers as unsatisfiable', () => {
+    // {profile_type="cpu-id", profile_type="memory-id"} matches nothing;
+    // treating it as "last one wins" would silently send whichever value
+    // happened to be last instead of telling the user their query is empty.
+    assert.equal(
+      isMalformedQuery(`{profile_type="${CPU}", profile_type="${MEM}"}`),
+      true,
+    );
+    assert.deepEqual(
+      splitQuery(`{profile_type="${CPU}", profile_type="${MEM}"}`),
+      { profileTypeID: '', labelSelector: '{}' },
+    );
+  });
+
+  it('accepts identical duplicate profile_type= matchers', () => {
+    assert.equal(
+      isMalformedQuery(`{profile_type="${CPU}", profile_type="${CPU}"}`),
+      false,
+    );
+    assert.deepEqual(
+      splitQuery(`{profile_type="${CPU}", profile_type="${CPU}"}`),
+      { profileTypeID: CPU, labelSelector: '{}' },
+    );
+  });
+
+  it('rejects profile_type and __profile_type__ disagreeing across spellings', () => {
+    assert.equal(
+      isMalformedQuery(`{profile_type="${CPU}", __profile_type__="${MEM}"}`),
+      true,
+    );
+  });
+
+  it('accepts profile_type and __profile_type__ agreeing across spellings', () => {
+    assert.equal(
+      isMalformedQuery(`{profile_type="${CPU}", __profile_type__="${CPU}"}`),
+      false,
+    );
+  });
+});
+
+describe('malformedQueryReason', () => {
+  it('is null for blank and well-formed queries', () => {
+    assert.equal(malformedQueryReason(''), null);
+    assert.equal(malformedQueryReason('   '), null);
+    assert.equal(malformedQueryReason('{service_name="a"}'), null);
+    assert.equal(
+      malformedQueryReason(`{service_name="a", profile_type="${CPU}"}`),
+      null,
+    );
+  });
+
+  it('is "syntax" for input that does not parse', () => {
+    assert.equal(malformedQueryReason('this is garbage {{{'), 'syntax');
+    assert.equal(malformedQueryReason('{unclosed="a"'), 'syntax');
+  });
+
+  it('is "profileType" for a parseable but unsupported pseudo-label constraint', () => {
+    // Distinct from 'syntax' so a caller can point at the real problem — a
+    // regex/negation, or conflicting values — instead of blaming syntax for
+    // a query that parsed fine.
+    assert.equal(
+      malformedQueryReason('{profile_type=~"process.*"}'),
+      'profileType',
+    );
+    assert.equal(
+      malformedQueryReason(`{profile_type="${CPU}", profile_type="${MEM}"}`),
+      'profileType',
+    );
+    assert.equal(
+      malformedQueryReason(`{profile_type="${CPU}", profile_type=~"mem.*"}`),
+      'profileType',
+    );
+  });
+
+  it('prefers "syntax" over "profileType" when both would apply', () => {
+    // An input that fails to parse never reaches the pseudo-label check.
+    assert.equal(malformedQueryReason('{profile_type=~'), 'syntax');
+  });
+
+  it('is "profileType" for an explicit empty profile_type value', () => {
+    // profile_type="" parses fine and is a single distinct = value, so
+    // without this it read as "usable" while the querier's profileTypeID
+    // can never be empty — the user's explicit constraint would otherwise
+    // fetch nothing with no message explaining why.
+    assert.equal(malformedQueryReason('{profile_type=""}'), 'profileType');
+  });
+
+  it('stays null when no pseudo-label matcher is present at all', () => {
+    // Distinct from an explicit profile_type="": this is "nothing selected
+    // yet", the state the default-query effect handles, not a malformed one.
+    assert.equal(malformedQueryReason('{service_name="s"}'), null);
+  });
+});
+
+describe('empty profile_type value', () => {
+  it('splitQuery yields an empty profileTypeID for an explicit empty value', () => {
+    assert.deepEqual(splitQuery('{profile_type=""}'), {
+      profileTypeID: '',
+      labelSelector: '{}',
+    });
+  });
+
+  it('parseQuery returns null for an explicit empty profile_type value', () => {
+    assert.equal(parseQuery('{service_name="s", profile_type=""}'), null);
   });
 });

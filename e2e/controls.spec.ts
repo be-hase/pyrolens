@@ -86,6 +86,166 @@ test('the range picker applies an absolute window as unix milliseconds', async (
   );
 });
 
+test('copy absolute link bakes the resolved bounds without navigating', async ({
+  page,
+  context,
+}) => {
+  // Chromium against 127.0.0.1 is a secure context, so navigator.clipboard
+  // exists; it still needs the permission grant to read/write without a
+  // user gesture prompt.
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+
+  await page.goto(url('/', { from: 'now-1h', until: 'now' }));
+  await openRangePicker(page);
+  await page.getByRole('button', { name: 'Copy absolute link' }).click();
+  // Reading the clipboard races writeText; waiting for the button's own
+  // "Copied" state is what actually orders the read after the write instead
+  // of relying on Chromium happening to schedule them in that order.
+  await expect(page.getByRole('button', { name: 'Copied' })).toBeVisible();
+
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  const copiedParams = new URL(copied).searchParams;
+  expect(copiedParams.get('from')).toMatch(/^\d+$/);
+  expect(copiedParams.get('until')).toMatch(/^\d+$/);
+  // from=now-1h&until=now: the baked bounds must span that same hour, not
+  // just be two numbers — a bug that baked the same instant twice for both
+  // would still pass the regex checks above.
+  expect(
+    Number(copiedParams.get('until')) - Number(copiedParams.get('from')),
+  ).toBe(3_600_000);
+
+  // The screen itself must stay on the relative range: baking is for the
+  // copied text only, not a navigation.
+  const params = new URL(page.url()).searchParams;
+  expect(params.get('from')).toBe('now-1h');
+});
+
+test('`y` switches the range to absolute, and is ignored while typing', async ({
+  page,
+}) => {
+  await page.goto(url('/', { from: 'now-1h', until: 'now' }));
+  await expect(page.locator('.plfg-metadata-pill').first()).toBeVisible();
+
+  const params = () => new URL(page.url()).searchParams;
+  const trigger = page
+    .locator('.time-range-picker')
+    .getByRole('button')
+    .first();
+  await expect(trigger).toHaveText(/Last/);
+
+  // Typing "y" into the query bar must add a letter, not fire the shortcut —
+  // checked here, before the range goes absolute, because doing it after
+  // would let a broken guard slip past: it would just rewrite the same
+  // from/until the shortcut already wrote, and the assertions below would
+  // still pass having proven nothing. The guard has to see the keydown's
+  // target, not just the key.
+  const input = page.getByRole('combobox');
+  const before = await input.inputValue();
+  await input.click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('y');
+  await expect(input).toHaveValue(`${before}y`);
+  expect(params().get('from')).toBe('now-1h');
+  expect(params().get('until')).toBe('now');
+
+  // Move focus back to the page body so the next `y` is not swallowed by
+  // the same guard that just proved itself.
+  await input.blur();
+  await page.keyboard.press('y');
+
+  await expect.poll(() => params().get('from')).toMatch(/^\d+$/);
+  expect(params().get('until')).toMatch(/^\d+$/);
+  // The absolute label ("Aug 7 09:30 – ...") replaces the relative "Last 1h" —
+  // that flip is the shortcut's only user-visible feedback.
+  await expect(trigger).not.toHaveText(/Last/);
+});
+
+test('the `t a` sequence switches the range to absolute, mirroring `y`', async ({
+  page,
+}) => {
+  await page.goto(url('/', { from: 'now-1h', until: 'now' }));
+  await expect(page.locator('.plfg-metadata-pill').first()).toBeVisible();
+
+  const params = () => new URL(page.url()).searchParams;
+  const trigger = page
+    .locator('.time-range-picker')
+    .getByRole('button')
+    .first();
+  await expect(trigger).toHaveText(/Last/);
+
+  // Focus is on the page body here, not an input, so the sequence fires.
+  await page.keyboard.press('t');
+  await page.keyboard.press('a');
+
+  await expect.poll(() => params().get('from')).toMatch(/^\d+$/);
+  expect(params().get('until')).toMatch(/^\d+$/);
+  await expect(trigger).not.toHaveText(/Last/);
+});
+
+test('`t c` copies the range as Grafana JSON — relative as-is, absolute as ISO-8601 — and `t v` pastes it back', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+
+  await page.goto(url('/', { from: 'now-1h', until: 'now' }));
+  await expect(page.locator('.plfg-metadata-pill').first()).toBeVisible();
+
+  const params = () => new URL(page.url()).searchParams;
+  const trigger = page
+    .locator('.time-range-picker')
+    .getByRole('button')
+    .first();
+  const readClipboard = () =>
+    page.evaluate(() => navigator.clipboard.readText());
+
+  // `t c`: a relative range copies as Grafana's own clipboard shape — exactly
+  // `{"from":"now-1h","to":"now"}`, so it pastes back into Grafana itself
+  // unchanged.
+  await page.keyboard.press('t');
+  await page.keyboard.press('c');
+  await expect(trigger).toHaveText('Copied');
+  expect(JSON.parse(await readClipboard())).toEqual({
+    from: 'now-1h',
+    to: 'now',
+  });
+
+  // An absolute range copies as ISO-8601 UTC instead — the shape
+  // `toISOString()` produces and current Grafana itself reads and writes.
+  const absoluteFrom = new Date(2026, 0, 2, 9, 5, 0).getTime();
+  const absoluteUntil = new Date(2026, 0, 2, 17, 30, 0).getTime();
+  await page.goto(url('/', { from: absoluteFrom, until: absoluteUntil }));
+  await expect(page.locator('.plfg-metadata-pill').first()).toBeVisible();
+  await page.keyboard.press('t');
+  await page.keyboard.press('c');
+  await expect(trigger).toHaveText('Copied');
+  expect(JSON.parse(await readClipboard())).toEqual({
+    from: new Date(absoluteFrom).toISOString(),
+    to: new Date(absoluteUntil).toISOString(),
+  });
+
+  // `t v`: seed the clipboard with an absolute, ISO-8601 range (current
+  // Grafana's own format) and paste it back on a relative screen; the URL
+  // should gain the equivalent unix-ms bounds. Date.parse of the same ISO
+  // strings, not a hand-built local Date, keeps the expectation independent
+  // of the runner's timezone.
+  await page.goto(url('/', { from: 'now-1h', until: 'now' }));
+  await expect(page.locator('.plfg-metadata-pill').first()).toBeVisible();
+  const fromIso = '2026-01-02T09:05:00.000Z';
+  const toIso = '2026-01-02T17:30:00.000Z';
+  await page.evaluate(
+    (payload) => navigator.clipboard.writeText(JSON.stringify(payload)),
+    { from: fromIso, to: toIso },
+  );
+  await page.keyboard.press('t');
+  await page.keyboard.press('v');
+
+  await expect
+    .poll(() => params().get('from'))
+    .toBe(String(Date.parse(fromIso)));
+  expect(params().get('until')).toBe(String(Date.parse(toIso)));
+});
+
 test('the tag explorer switches the label it groups by', async ({ page }) => {
   await page.goto(url('/explore', { groupBy: 'region' }));
   await expect(page.locator('.tag-explorer-table')).toBeVisible();

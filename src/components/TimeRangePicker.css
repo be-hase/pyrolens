@@ -177,6 +177,13 @@
   margin-top: auto;
 }
 
+/* Secondary action below Apply; a small gap keeps it from reading as part of
+   the same control. */
+.trp-copy-link {
+  justify-content: center;
+  margin-top: var(--space-1);
+}
+
 .trp-presets {
   display: flex;
   flex-direction: column;

@@ -11,13 +11,8 @@ import {
   profileTypeUnit,
 } from '@api/client';
 import { useFetched } from '@hooks/useFetched';
-import { MALFORMED_MESSAGE } from '@hooks/useProfileData';
-import {
-  isMalformedQuery,
-  splitQuery,
-  toInternalLabel,
-  upsertMatcher,
-} from '../queryLang';
+import { malformedMessage } from '@hooks/useProfileData';
+import { splitQuery, toInternalLabel, upsertMatcher } from '../queryLang';
 import { timelineStep } from '../time';
 import { formatCell, groupByLabels, summarize } from './tagExplorerData';
 import { navigate, useRoute } from '../urlState';
@@ -25,9 +20,10 @@ import './TagExplorerView.css';
 
 const MAX_SERIES = 8;
 
-// The client synthesizes this for series missing the group-by label; as a
-// matcher it has to become `label=""`, which is how the selector says
-// "no such label" — the literal string would match nothing.
+// Display placeholder for a series missing the group-by label. Missingness
+// itself is tracked structurally (GroupedTimeline.labelValue is null), so
+// this is purely cosmetic — it never has to be told apart from a series
+// whose label value is literally the string "(none)".
 const NONE_LABEL = '(none)';
 
 // Break down a profile by one label: a timeline per label value plus a table
@@ -66,7 +62,7 @@ export function TagExplorerView({
 
   const active = !!profileTypeID && !!groupBy;
   const grouped = useFetched(
-    [] as { labelValue: string; points: NamedSeries['points'] }[],
+    [] as { labelValue: string | null; points: NamedSeries['points'] }[],
     active,
     (signal) =>
       fetchGroupedTimelines(
@@ -83,13 +79,18 @@ export function TagExplorerView({
     [profileTypeID, labelSelector, groupBy, range.start, range.end, tenantID],
   );
   const loading = active && grouped.fetching;
-  const error = isMalformedQuery(query)
-    ? MALFORMED_MESSAGE
-    : ((active ? grouped.fetchError : null) ??
-      (profileTypeID ? labels.fetchError : null));
+  const error =
+    malformedMessage(query) ??
+    (active ? grouped.fetchError : null) ??
+    (profileTypeID ? labels.fetchError : null);
 
   const allSeries = useMemo(
-    () => grouped.data.map((g) => ({ label: g.labelValue, points: g.points })),
+    () =>
+      grouped.data.map((g) => ({
+        label: g.labelValue ?? NONE_LABEL,
+        value: g.labelValue,
+        points: g.points,
+      })),
     [grouped.data],
   );
   // Shares are computed across every group; only the top slice is drawn and
@@ -101,16 +102,22 @@ export function TagExplorerView({
   const unit = profileTypeUnit(profileTypeID);
   const fmt = (v: number) => formatCell(v, unit);
 
-  const matcherValue = (label: string) => (label === NONE_LABEL ? '' : label);
+  // Only a genuinely missing label becomes the "no such label" matcher; a
+  // series whose value is literally the string "(none)" is passed through
+  // (upsertMatcher escapes/quotes it like any other value).
+  const matcherValue = (value: string | null) => (value === null ? '' : value);
 
-  const selectRow = (value: string) => {
+  const selectRow = (value: string | null) => {
     navigate({
       path: '/',
       set: { query: upsertMatcher(query, groupBy, matcherValue(value)) },
     });
   };
 
-  const compareRow = (value: string, target: '/comparison' | '/diff') => {
+  const compareRow = (
+    value: string | null,
+    target: '/comparison' | '/diff',
+  ) => {
     const withMatcher = upsertMatcher(query, groupBy, matcherValue(value));
     navigate({
       path: target,
@@ -192,7 +199,10 @@ export function TagExplorerView({
             </thead>
             <tbody>
               {rows.map((row, i) => (
-                <tr key={row.label}>
+                // Keyed on the discriminator, not the display label: a
+                // missing-label bucket and a literal "(none)" bucket both
+                // display as NONE_LABEL but must stay distinct rows.
+                <tr key={row.value === null ? ' none' : 'v' + row.value}>
                   <td className="tag-explorer-chip-cell">
                     {/* Rows and series come from the same ranking, so the
                         row's position is its palette slot in the chart. */}
@@ -206,7 +216,7 @@ export function TagExplorerView({
                       type="button"
                       className="tag-explorer-value-link"
                       title="Open in Single view"
-                      onClick={() => selectRow(row.label)}
+                      onClick={() => selectRow(row.value)}
                     >
                       {row.label}
                     </button>
@@ -217,13 +227,13 @@ export function TagExplorerView({
                   <td className="tag-explorer-actions">
                     <button
                       type="button"
-                      onClick={() => compareRow(row.label, '/comparison')}
+                      onClick={() => compareRow(row.value, '/comparison')}
                     >
                       Compare
                     </button>
                     <button
                       type="button"
-                      onClick={() => compareRow(row.label, '/diff')}
+                      onClick={() => compareRow(row.value, '/diff')}
                     >
                       Diff
                     </button>

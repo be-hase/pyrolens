@@ -121,4 +121,77 @@ describe('useFetched', () => {
     rerender({ t: 'team-b' });
     await waitFor(() => assert.equal(calls.length, 2));
   });
+
+  it('returns to initial when active flips false after a successful fetch', async () => {
+    // A cleared query (active turns false) must not keep showing the last
+    // profile fetched while it was set — that is a stale flamegraph with no
+    // loading or error indication telling the user why.
+    const { result, rerender } = renderHook(
+      ({ active }) =>
+        useFetched('initial', active, async () => 'fetched', ['a']),
+      { initialProps: { active: true } },
+    );
+    await waitFor(() => assert.equal(result.current.data, 'fetched'));
+
+    rerender({ active: false });
+    assert.equal(result.current.data, 'initial');
+    assert.equal(result.current.fetching, false);
+  });
+
+  it('drops to initial, not the previous key data, once the new key fetch fails', async () => {
+    // Deps moving from A to B while B's fetch fails must not leave A's data
+    // on screen next to B's error — the two belong to different queries.
+    let fail!: (reason: unknown) => void;
+    const { result, rerender } = renderHook(
+      ({ q }) =>
+        useFetched(
+          'initial',
+          true,
+          async () => {
+            if (q === 'a') return 'a-data';
+            return new Promise<string>((_resolve, reject) => {
+              fail = reject;
+            });
+          },
+          [q],
+        ),
+      { initialProps: { q: 'a' } },
+    );
+    await waitFor(() => assert.equal(result.current.data, 'a-data'));
+
+    rerender({ q: 'b' });
+    await waitFor(() => assert.equal(result.current.fetching, true));
+    fail(new Error('boom'));
+    await waitFor(() => assert.equal(result.current.fetchError, 'boom'));
+    assert.equal(result.current.data, 'initial');
+  });
+
+  it('keeps the previous key data on screen while the next key fetch is in flight', async () => {
+    // Stale-while-refetching: the spinner for B shows next to A's last
+    // answer, not a blank slate, until B's fetch settles one way or another.
+    let settle!: (value: string) => void;
+    const { result, rerender } = renderHook(
+      ({ q }) =>
+        useFetched(
+          'initial',
+          true,
+          async () => {
+            if (q === 'a') return 'a-data';
+            return new Promise<string>((resolve) => {
+              settle = resolve;
+            });
+          },
+          [q],
+        ),
+      { initialProps: { q: 'a' } },
+    );
+    await waitFor(() => assert.equal(result.current.data, 'a-data'));
+
+    rerender({ q: 'b' });
+    await waitFor(() => assert.equal(result.current.fetching, true));
+    assert.equal(result.current.data, 'a-data');
+
+    settle('b-data');
+    await waitFor(() => assert.equal(result.current.data, 'b-data'));
+  });
 });

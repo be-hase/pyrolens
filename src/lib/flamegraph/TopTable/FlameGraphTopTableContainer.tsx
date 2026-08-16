@@ -526,12 +526,31 @@ function buildTableRows(
       // We are iterating over table of the data so totalTicksRight needs to be defined
       const totalTicksLeft = totalTicks - totalTicksRight!;
 
+      // Deviates from upstream: upstream divides by totalTicksLeft/totalTicksRight
+      // unconditionally, which is NaN when that side of the diff interval has
+      // no samples at all (e.g. an empty baseline time range). A percentage
+      // over a zero total is defined as 0 instead.
       const percentageLeft =
-        Math.round((10000 * ticksLeft) / totalTicksLeft) / 100;
+        totalTicksLeft === 0
+          ? 0
+          : Math.round((10000 * ticksLeft) / totalTicksLeft) / 100;
       const percentageRight =
-        Math.round((10000 * ticksRight) / totalTicksRight!) / 100;
+        totalTicksRight === 0
+          ? 0
+          : Math.round((10000 * ticksRight) / totalTicksRight!) / 100;
 
-      const diff = ((percentageRight - percentageLeft) / percentageLeft) * 100;
+      // Deviates from upstream: upstream computes
+      // ((percentageRight - percentageLeft) / percentageLeft) * 100
+      // unconditionally, which divides by zero whenever the baseline
+      // percentage is 0. Two zero percentages is a real, well-defined 0 diff;
+      // a zero baseline against a nonzero comparison divides out to
+      // +Infinity, which formatDiff/diffColor below already render as an
+      // honest "new" rather than the literal word "Infinity", and which
+      // numericValue keeps sortable.
+      const diff =
+        percentageLeft === 0 && percentageRight === 0
+          ? 0
+          : ((percentageRight - percentageLeft) / percentageLeft) * 100;
 
       rows.push({
         symbol: key,

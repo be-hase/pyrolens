@@ -14,6 +14,11 @@ import { useEffect, useRef, useState } from 'react';
 //   query does not keep showing the failure of the one before it.
 // - A fetch that is due but has not started counts as loading, so the gap
 //   before the effect runs never renders as an answer.
+// - Data from a superseded key is only shown while a newer fetch is still
+//   in flight (stale-while-refetching); once that fetch settles — success
+//   or failure — data belonging to a key nobody is fetching for anymore is
+//   replaced by `initial`. And whenever `active` is false, `initial` is
+//   returned outright: an inactive hook has nothing current to show.
 
 export interface Fetched<T> {
   data: T;
@@ -35,7 +40,19 @@ export function useFetched<T>(
   load: (signal: AbortSignal) => Promise<T>,
   deps: readonly (string | number | boolean | null | undefined)[],
 ): Fetched<T> {
+  // Captured once: React keeps a `useState` argument only from the render
+  // that mounted it. Callers pass a fresh `[]` literal as `initial` on every
+  // render, and returning a new reference each time it applies would churn
+  // any `useMemo` downstream that depends on `data`. (A ref would do the
+  // same job, but reading `.current` during render breaks the rules of
+  // React, which the lint config enforces.)
+  const [stableInitial] = useState(initial);
   const [data, setData] = useState<T>(initial);
+  // The key `data` was actually produced for, so a key that no one is
+  // fetching for anymore (superseded, and that fetch has since settled)
+  // does not keep painting its stale answer next to a different key's
+  // result or error.
+  const [dataKey, setDataKey] = useState<string | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   // The key a fetch has actually been started for, and whether that fetch is
   // still running. The effect only runs after the commit, so between a deps
@@ -67,6 +84,7 @@ export function useFetched<T>(
         const value = await loadRef.current(controller.signal);
         if (controller.signal.aborted) return;
         setData(value);
+        setDataKey(key);
       } catch (e: unknown) {
         if (controller.signal.aborted) return;
         setFetchError(e instanceof Error ? e.message : String(e));
@@ -79,9 +97,17 @@ export function useFetched<T>(
     return () => controller.abort();
   }, [active, key]);
 
+  const fetching = active && (started !== key || inFlight);
+  // Superseded data still shows while its successor is in flight (the same
+  // condition as `fetching`), so a refetch does not blank the screen; once
+  // that settles, a key nobody is fetching for falls back to `initial`
+  // rather than sitting next to another key's result or error. Inactive
+  // always shows `initial` — there is nothing current to show.
+  const showStored = active && (dataKey === key || fetching);
+
   return {
-    data,
-    fetching: active && (started !== key || inFlight),
+    data: showStored ? data : stableInitial,
+    fetching,
     fetchError,
   };
 }

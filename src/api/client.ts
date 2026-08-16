@@ -133,7 +133,12 @@ export function sortProfileTypes(profileTypes: string[]): string[] {
   const rank = (id: string) => (profileTypeLabel(id) === 'cpu' ? 0 : 1);
   return [...profileTypes].sort(
     (a, b) =>
-      rank(a) - rank(b) || byName(profileTypeLabel(a), profileTypeLabel(b)),
+      rank(a) - rank(b) ||
+      byName(profileTypeLabel(a), profileTypeLabel(b)) ||
+      // Two IDs can share a label (process_cpu and wall both say "cpu"); fall
+      // back to the full ID so the default query doesn't depend on the
+      // upstream Series order, which a stable sort would otherwise preserve.
+      byName(a, b),
   );
 }
 
@@ -296,7 +301,8 @@ export async function fetchTimeline(
 }
 
 export interface GroupedTimeline {
-  labelValue: string;
+  /** null when the series lacked the group-by label entirely. */
+  labelValue: string | null;
   points: Point[];
 }
 
@@ -316,12 +322,13 @@ export async function fetchGroupedTimelines(
     signal,
   );
 
-  // Series can share a label value (notably every series missing the label
-  // maps to '(none)') — merge them by summing per timestamp.
-  const merged = new Map<string, Map<number, number>>();
+  // Series can share a label value — merge them by summing per timestamp.
+  // A missing label is kept as null rather than a sentinel string, so a
+  // series whose label value is literally the string "(none)" lands in its
+  // own bucket instead of merging with the ones that lack the label.
+  const merged = new Map<string | null, Map<number, number>>();
   for (const s of res.series ?? []) {
-    const labelValue =
-      s.labels?.find((l) => l.name === groupBy)?.value ?? '(none)';
+    const labelValue = s.labels?.find((l) => l.name === groupBy)?.value ?? null;
     const bucket = merged.get(labelValue) ?? new Map<number, number>();
     for (const p of toPoints(s.points)) {
       bucket.set(p.timestamp, (bucket.get(p.timestamp) ?? 0) + p.value);

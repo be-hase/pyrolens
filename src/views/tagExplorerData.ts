@@ -13,6 +13,13 @@ import { isInternalLabel, toDisplayLabel } from '../queryLang';
 
 export interface TagRow {
   label: string;
+  /**
+   * The series' discriminator, distinct from `label` when the input had none
+   * (label falls back to a display placeholder; value stays null so a
+   * genuinely missing value can't be confused with one that merely displays
+   * the same).
+   */
+  value: string | null;
   /** Total of every point, which is what the rows are ranked by. */
   sum: number;
   avg: number;
@@ -22,9 +29,15 @@ export interface TagRow {
 }
 
 /** Breakdown rows, largest total first. */
-export function summarize(series: NamedSeries[]): TagRow[] {
+export function summarize(
+  series: (NamedSeries & { value?: string | null })[],
+): TagRow[] {
   const totals = series.map((s) => ({
     label: s.label,
+    // No `value` on the input means the caller has no discriminator to
+    // offer either; fall back to the display label rather than null, which
+    // is reserved for "the series genuinely lacked this value".
+    value: s.value === undefined ? s.label : s.value,
     sum: s.points.reduce((acc, p) => acc + p.value, 0),
     avg: s.points.length
       ? s.points.reduce((acc, p) => acc + p.value, 0) / s.points.length

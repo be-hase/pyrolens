@@ -110,6 +110,15 @@ All state is carried in query parameters; every view is shareable.
 
 Views: `/` (Single), `/comparison`, `/diff`, `/explore` (Tag Explorer).
 
+Keyboard shortcuts: `y` or `t a` switches the time range to absolute so the
+URL can be shared as-is; `t c` copies it (Grafana's own clipboard format, so
+it pastes in either tool) and `t v` pastes it back. `t v` needs a secure
+context (HTTPS or localhost) to read the clipboard; `t c` has a legacy
+fallback for an insecure one, the same one `copy absolute link` uses, which
+can still fail depending on the browser. Grafana's rounded relative ranges
+(`now/d` and the like) are not supported in either direction: pyrolens URLs
+cannot express them, so pasting one reports "Paste failed".
+
 ## Development
 
 ```sh
