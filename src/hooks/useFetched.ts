@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 // The one fetch-effect skeleton every data hook shares. The protocol it
 // enforces used to be copy-pasted per call site, and the copies drifted —
@@ -19,11 +19,18 @@ import { useEffect, useRef, useState } from 'react';
 //   or failure — data belonging to a key nobody is fetching for anymore is
 //   replaced by `initial`. And whenever `active` is false, `initial` is
 //   returned outright: an inactive hook has nothing current to show.
+// - `retry()` re-runs the load for the *current* deps key without changing
+//   what counts as that key's data: it bumps an `attempt` counter that only
+//   participates in the run identity (so the due-but-not-started gap still
+//   counts as loading after a retry), never in `dataKey` (so a retry keeps
+//   showing that key's previous data while it reloads — the same
+//   stale-while-refetching behaviour a deps change gets).
 
 export interface Fetched<T> {
   data: T;
   fetching: boolean;
   fetchError: string | null;
+  retry: () => void;
 }
 
 /**
@@ -54,13 +61,20 @@ export function useFetched<T>(
   // result or error.
   const [dataKey, setDataKey] = useState<string | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  // The key a fetch has actually been started for, and whether that fetch is
-  // still running. The effect only runs after the commit, so between a deps
-  // change and that effect there is a render holding the previous data with
-  // nothing in flight; reporting "not loading" there shows a stale or empty
-  // result as though it were the answer for the new deps.
+  // The run a fetch has actually been started for (key plus attempt — see
+  // `runId` below), and whether that fetch is still running. The effect only
+  // runs after the commit, so between a deps/attempt change and that effect
+  // there is a render holding the previous data with nothing in flight;
+  // reporting "not loading" there shows a stale or empty result as though it
+  // were the answer for the new run.
   const [started, setStarted] = useState<string | null>(null);
   const [inFlight, setInFlight] = useState(false);
+  // Bumped by `retry()` to force the effect below to re-run for the same
+  // deps key. Only ever compared as part of `runId` — it never touches
+  // `dataKey`, so a retry is stale-while-refetching against that key's own
+  // previous data, exactly like a deps change is against the key before it.
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt((a) => a + 1), []);
 
   // `load` is a fresh closure every render; the fetch effect reads the
   // latest one through a ref so `deps` alone decide when to refetch. The
@@ -71,13 +85,19 @@ export function useFetched<T>(
     loadRef.current = load;
   });
   const key = JSON.stringify(deps);
+  // Identifies a single run of the effect below. Comparing `started` against
+  // this (rather than against `key` alone) is what makes a retry of the same
+  // key immediately read as "started !== runId" — the loading gap between
+  // the attempt bump and the effect running would otherwise report idle,
+  // because `key` itself never changed.
+  const runId = `${key}#${attempt}`;
 
   useEffect(() => {
     if (!active) return;
     const controller = new AbortController();
 
     async function run() {
-      setStarted(key);
+      setStarted(runId);
       setInFlight(true);
       setFetchError(null);
       try {
@@ -95,9 +115,9 @@ export function useFetched<T>(
     run();
 
     return () => controller.abort();
-  }, [active, key]);
+  }, [active, key, attempt, runId]);
 
-  const fetching = active && (started !== key || inFlight);
+  const fetching = active && (started !== runId || inFlight);
   // Superseded data still shows while its successor is in flight (the same
   // condition as `fetching`), so a refetch does not blank the screen; once
   // that settles, a key nobody is fetching for falls back to `initial`
@@ -109,5 +129,6 @@ export function useFetched<T>(
     data: showStored ? data : stableInitial,
     fetching,
     fetchError,
+    retry,
   };
 }

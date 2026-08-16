@@ -22,7 +22,16 @@ import {
   type SortKey,
 } from './tagExplorerData';
 import { navigate, useRoute } from '../urlState';
+import { ErrorBanner } from './ComparisonPane';
 import './TagExplorerView.css';
+
+// Adapted from FLAMEGRAPH_EMPTY_MESSAGE (SingleView.tsx / ComparisonView.tsx):
+// there is nothing to break down rather than nothing to draw, so the wording
+// says that instead.
+const BREAKDOWN_EMPTY_MESSAGE =
+  'No profiles matched this query in this range, so there is nothing to ' +
+  'break down. Recently ingested profiles can take about a minute to ' +
+  'become queryable.';
 
 const MAX_SERIES = 8;
 
@@ -103,6 +112,16 @@ export function TagExplorerView({
     malformedMessage(query) ??
     (active ? grouped.fetchError : null) ??
     (profileTypeID ? labels.fetchError : null);
+  // A single banner can only show one message, but when both fetches failed
+  // a Retry that only re-ran one of them looked dead — the banner would
+  // just swap to the other's identical-looking error. So Retry composes
+  // every fetch that actually has an error (mirroring SingleView).
+  const retries = [
+    active && grouped.fetchError ? grouped.retry : undefined,
+    profileTypeID && labels.fetchError ? labels.retry : undefined,
+  ].filter((r): r is () => void => !!r);
+  const retry =
+    retries.length > 0 ? () => retries.forEach((r) => r()) : undefined;
 
   const allSeries = useMemo(
     () =>
@@ -197,6 +216,15 @@ export function TagExplorerView({
     });
   };
 
+  // No-frames placeholder for the Breakdown panel. While loading, the
+  // Timeline panel above already shows "Loading…" — see FlameGraph's
+  // identical reasoning for rendering nothing rather than a second,
+  // redundant message. And no contextual claim while the banner already
+  // shows this fetch's error — see FlameGraph's identical gate.
+  const breakdownEmpty = loading ? null : (
+    <Empty message={error ? undefined : BREAKDOWN_EMPTY_MESSAGE} />
+  );
+
   return (
     <div className="app-content">
       <ControlsBar
@@ -225,7 +253,7 @@ export function TagExplorerView({
         </div>
       )}
 
-      {error && <div className="app-error">{error}</div>}
+      {error && <ErrorBanner error={error} retry={retry} />}
 
       <Panel
         title={groupBy ? `Timeline by ${groupBy}` : 'Timeline'}
@@ -247,7 +275,7 @@ export function TagExplorerView({
 
       <Panel title="Breakdown">
         {rows.length === 0 ? (
-          <Empty />
+          breakdownEmpty
         ) : (
           <table className="tag-explorer-table">
             <thead>

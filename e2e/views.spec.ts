@@ -325,23 +325,64 @@ test('the tag explorer groups by the label the URL names', async ({ page }) => {
   expect(grouped.some((entry) => entry.groupBy?.includes('region'))).toBe(true);
 });
 
-test('an empty profile says so instead of drawing nothing', async ({
+test('an empty profile says so instead of drawing nothing, with a way out', async ({
   page,
 }) => {
   // A selector that matches nothing, which the fake upstream answers the way
-  // the real server does: a single root of width zero.
+  // the real server does: a single root of width zero. The fixture's window
+  // is an absolute range, not now-24h, so the escape hatch below is offered.
   await page.goto(
     url('/', {
       query: `{service_name="nope", profile_type="${meta.profileType}"}`,
     }),
   );
 
+  // FlameGraph renders nothing at all while its fetch is in flight — the
+  // Panel's own "Loading…" meta already says so, and the placeholder's
+  // "no profiles matched" claim would be false for that whole first fetch.
+  // Wait for that meta to clear before looking for the placeholder, so this
+  // isn't just catching the loading gap.
+  const flamegraphPanel = page
+    .locator('.panel')
+    .filter({ has: page.locator('.panel-title', { hasText: 'Flamegraph' }) });
+  await expect(flamegraphPanel.locator('.panel-meta')).not.toHaveText(
+    'Loading…',
+  );
+
   const empty = page.locator('.empty').first();
   await expect(empty).toBeVisible();
+  await expect(empty).toContainText(
+    'Recently ingested profiles can take about a minute to become queryable.',
+  );
   // And it is still empty once the response has landed. Asserting only that
   // the placeholder appeared would pass on the flash of it shown while the
   // first request is in flight, whatever the answer turned out to be — which
   // is how this test came to fail once on main and pass everywhere else.
   await expect(page.locator('.plfg-canvas-graph')).toHaveCount(0);
   await expect(empty).toBeVisible();
+
+  // The action is the way out of the empty state: it widens the range and
+  // refetches, rather than leaving the query bar as the only recourse.
+  await clearUpstreamLog(page);
+  await empty.getByRole('button', { name: 'Last 24 hours' }).click();
+
+  await expect(page).toHaveURL(/from=now-24h/);
+  await expect(page).not.toHaveURL(/until=/);
+  // Not just that a request went out, but that it actually asked for the
+  // widened range — a stale pane range (e.g. a Comparison-only bug leaking
+  // in) would still fire a request without spanning the 24 hours promised.
+  await expect
+    .poll(async () => {
+      const last = (await upstreamLog(page))
+        .filter((entry) => entry.method === 'SelectMergeStacktraces')
+        .at(-1);
+      return last ? (last.end ?? 0) - (last.start ?? 0) : null;
+    })
+    .toBe(86_400_000);
+
+  // Offering the same action again would be a no-op — the range already is
+  // now-24h — so it drops out rather than sitting there doing nothing.
+  await expect(
+    empty.getByRole('button', { name: 'Last 24 hours' }),
+  ).toHaveCount(0);
 });

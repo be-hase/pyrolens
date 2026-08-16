@@ -55,6 +55,7 @@ export function useFlamegraph({
   flamegraph: FlamegraphData;
   loading: boolean;
   error: string | null;
+  retry?: () => void;
 } {
   const { profileTypeID, labelSelector } = splitQuery(query);
   const { start, end } = range;
@@ -63,7 +64,7 @@ export function useFlamegraph({
   // previous error disappear without an effect having to reset them (an
   // aborted request never reaches its own cleanup).
   const active = enabled && !!profileTypeID;
-  const { data, fetching, fetchError } = useFetched(
+  const { data, fetching, fetchError, retry } = useFetched(
     EMPTY,
     active,
     (signal) =>
@@ -71,10 +72,16 @@ export function useFlamegraph({
     [profileTypeID, labelSelector, start, end, tenantID],
   );
 
+  const malformed = malformedMessage(query);
   return {
     flamegraph: data,
     loading: active && fetching,
-    error: malformedMessage(query) ?? (active ? fetchError : null),
+    error: malformed ?? (active ? fetchError : null),
+    // A malformed query (or a broken profile_type) never made `active`
+    // true, so no fetch ever started for it — retry() would just bump a
+    // counter into an effect that early-returns on `!active`. Exposing it
+    // anyway rendered a Retry button that looked live but did nothing.
+    retry: malformed ? undefined : retry,
   };
 }
 
@@ -83,12 +90,17 @@ export function useTimeline({
   range,
   tenantID,
   enabled = true,
-}: FetchOpts): { timeline: Point[]; loading: boolean; error: string | null } {
+}: FetchOpts): {
+  timeline: Point[];
+  loading: boolean;
+  error: string | null;
+  retry?: () => void;
+} {
   const { profileTypeID, labelSelector } = splitQuery(query);
   const { start, end } = range;
 
   const active = enabled && !!profileTypeID;
-  const { data, fetching, fetchError } = useFetched(
+  const { data, fetching, fetchError, retry } = useFetched(
     [] as Point[],
     active,
     (signal) =>
@@ -105,10 +117,14 @@ export function useTimeline({
     [profileTypeID, labelSelector, start, end, tenantID],
   );
 
+  const malformed = malformedMessage(query);
   return {
     timeline: data,
     loading: active && fetching,
-    error: malformedMessage(query) ?? (active ? fetchError : null),
+    error: malformed ?? (active ? fetchError : null),
+    // See useFlamegraph: a malformed query never started a fetch, so retry
+    // must not be offered for it.
+    retry: malformed ? undefined : retry,
   };
 }
 
@@ -128,51 +144,54 @@ export function useDiffFlamegraph({
   diff: DiffFlamegraphData | null;
   loading: boolean;
   error: string | null;
+  retry?: () => void;
 } {
   const left = splitQuery(leftQuery);
   const right = splitQuery(rightQuery);
 
   const active = !!left.profileTypeID && !!right.profileTypeID;
-  const { data, fetching, fetchError } = useFetched<DiffFlamegraphData | null>(
-    null,
-    active,
-    (signal) =>
-      fetchDiffFlamegraph(
-        {
-          profileTypeID: left.profileTypeID,
-          labelSelector: left.labelSelector,
-          start: leftRange.start,
-          end: leftRange.end,
-        },
-        {
-          profileTypeID: right.profileTypeID,
-          labelSelector: right.labelSelector,
-          start: rightRange.start,
-          end: rightRange.end,
-        },
-        signal,
-      ),
-    [
-      left.profileTypeID,
-      left.labelSelector,
-      right.profileTypeID,
-      right.labelSelector,
-      leftRange.start,
-      leftRange.end,
-      rightRange.start,
-      rightRange.end,
-      tenantID,
-    ],
-  );
+  const { data, fetching, fetchError, retry } =
+    useFetched<DiffFlamegraphData | null>(
+      null,
+      active,
+      (signal) =>
+        fetchDiffFlamegraph(
+          {
+            profileTypeID: left.profileTypeID,
+            labelSelector: left.labelSelector,
+            start: leftRange.start,
+            end: leftRange.end,
+          },
+          {
+            profileTypeID: right.profileTypeID,
+            labelSelector: right.labelSelector,
+            start: rightRange.start,
+            end: rightRange.end,
+          },
+          signal,
+        ),
+      [
+        left.profileTypeID,
+        left.labelSelector,
+        right.profileTypeID,
+        right.labelSelector,
+        leftRange.start,
+        leftRange.end,
+        rightRange.start,
+        rightRange.end,
+        tenantID,
+      ],
+    );
 
+  // First non-null wins: whichever pane is broken, the message names the
+  // real problem instead of always blaming the left pane.
+  const malformed = malformedMessage(leftQuery) ?? malformedMessage(rightQuery);
   return {
     diff: data,
     loading: active && fetching,
-    // First non-null wins: whichever pane is broken, the message names the
-    // real problem instead of always blaming the left pane.
-    error:
-      malformedMessage(leftQuery) ??
-      malformedMessage(rightQuery) ??
-      (active ? fetchError : null),
+    error: malformed ?? (active ? fetchError : null),
+    // See useFlamegraph: either pane being malformed means no fetch ever
+    // started, so retry must not be offered.
+    retry: malformed ? undefined : retry,
   };
 }
