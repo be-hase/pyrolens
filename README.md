@@ -113,6 +113,8 @@ All state is carried in query parameters; every view is shareable.
 | `leftQuery` / `leftFrom` / `leftUntil` (+ `right…`) | Comparison & Diff pane selections; default to `query` / range halves |
 | `groupBy`                                          | Tag Explorer grouping label                                          |
 | `sort`                                             | Tag Explorer breakdown table sort: `avg` or `max` (default: Share/sum) |
+| `fgSearch`                                         | flame graph search text; shared across Single, Comparison and Diff   |
+| `fgSandwich`                                       | flame graph sandwich-view selection (function label); shared across Single, Comparison and Diff |
 
 Views: `/` (Single), `/comparison`, `/diff`, `/explore` (Tag Explorer).
 

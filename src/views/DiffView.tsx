@@ -10,6 +10,7 @@ import {
   grafanaUnit,
 } from '@components/flamebearer';
 import { useDiffFlamegraph } from '@hooks/useProfileData';
+import { useFlameGraphUrlState } from '@hooks/useFlameGraphUrlState';
 import { splitQuery } from '../queryLang';
 import { ComparisonPane } from './ComparisonPane';
 import { useComparisonParams } from './comparisonParams';
@@ -26,6 +27,12 @@ export function DiffView({
   tenantID,
 }: ViewProps) {
   const { left, right } = useComparisonParams(query, range);
+  // Diff's flame graph shares the same fgSearch/fgSandwich URL params as
+  // Single and Comparison — the container used to be rendered uncontrolled
+  // here, so `/diff?fgSearch=alloc` silently did nothing even though README
+  // documents the params as global.
+  const { search, onSearchChange, sandwichItem, onSandwichChange } =
+    useFlameGraphUrlState();
 
   const { diff, loading, error } = useDiffFlamegraph({
     leftQuery: left.query,
@@ -75,7 +82,13 @@ export function DiffView({
       <Panel title="Diff flamegraph" meta={loading ? 'Loading…' : undefined}>
         {dataFrame ? (
           <div className="flamegraph-wrapper">
-            <GrafanaFlameGraph data={dataFrame} />
+            <GrafanaFlameGraph
+              data={dataFrame}
+              search={search}
+              onSearchChange={onSearchChange}
+              sandwichItem={sandwichItem}
+              onSandwichChange={onSandwichChange}
+            />
           </div>
         ) : (
           <Empty />

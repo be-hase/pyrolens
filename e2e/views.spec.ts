@@ -107,6 +107,134 @@ test('the comparison view renders both panes', async ({ page }) => {
   await expect(page.locator('.plfg-metadata-pill').first()).toBeVisible();
 });
 
+test('deep-linking fgSearch prefills the flame graph search box', async ({
+  page,
+}) => {
+  await page.goto(url('/', { fgSearch: 'queryDatabase' }));
+  await expect(page.getByRole('textbox', { name: 'Search' })).toHaveValue(
+    'queryDatabase',
+  );
+});
+
+test('typing into the flame graph search box writes fgSearch to the URL, and clearing it removes the param', async ({
+  page,
+}) => {
+  await page.goto(url('/'));
+  const search = page.getByRole('textbox', { name: 'Search' });
+
+  await search.fill('queryDatabase');
+  // Two debounces sit between a keystroke and the URL: the vendored
+  // header's own (250ms) feeding the wrapper's controlled search, then the
+  // wrapper's own (400ms) before it writes fgSearch. Poll rather than wait
+  // a fixed time so the assertion doesn't race either one.
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get('fgSearch'), {
+      timeout: 5_000,
+    })
+    .toBe('queryDatabase');
+
+  await search.fill('');
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get('fgSearch'), {
+      timeout: 5_000,
+    })
+    .toBeNull();
+});
+
+test('the comparison view shares fgSearch across both panes', async ({
+  page,
+}) => {
+  await page.goto(
+    url('/comparison', {
+      fgSearch: 'queryDatabase',
+      leftFrom: meta.left.start,
+      leftUntil: meta.left.end,
+      rightFrom: meta.right.start,
+      rightUntil: meta.right.end,
+    }),
+  );
+
+  // Both panes render their own flame graph header, so both should show the
+  // one shared value rather than each tracking its own.
+  const searches = page.getByRole('textbox', { name: 'Search' });
+  await expect(searches).toHaveCount(2);
+  await expect(searches.nth(0)).toHaveValue('queryDatabase');
+  await expect(searches.nth(1)).toHaveValue('queryDatabase');
+});
+
+test('typing into one Comparison pane settles the URL on the typed value instead of ping-ponging, and the other pane converges to it', async ({
+  page,
+}) => {
+  // Both panes' FlameGraph wrappers read/write the same fgSearch param. A
+  // debounced write effect that cannot tell its own settled edit from a
+  // stale echo of the other pane's commit ping-pongs the two panes'
+  // debounces against each other instead of settling — this test exists to
+  // catch that regressing.
+  await page.goto(
+    url('/comparison', {
+      leftFrom: meta.left.start,
+      leftUntil: meta.left.end,
+      rightFrom: meta.right.start,
+      rightUntil: meta.right.end,
+    }),
+  );
+
+  const searches = page.getByRole('textbox', { name: 'Search' });
+  await expect(searches).toHaveCount(2);
+
+  // Count `pyroscope:navigate` dispatches from inside the page rather than
+  // polling `page.url()` from Node: a livelock's ping-pong settles for good
+  // within a handful of debounce/render cycles (React batches the
+  // navigate()-triggers-a-rerender-triggers-navigate() chain faster than a
+  // few dozen milliseconds), well inside the granularity Node-side URL
+  // polling can resolve — this measured ~50 navigations for a single typed
+  // value against the unfixed effect, versus 1 once fixed.
+  await page.evaluate(() => {
+    (window as unknown as { __navCount: number }).__navCount = 0;
+    window.addEventListener('pyroscope:navigate', () => {
+      (window as unknown as { __navCount: number }).__navCount++;
+    });
+  });
+
+  await searches.nth(0).fill('queryDatabase');
+
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get('fgSearch'), {
+      timeout: 5_000,
+    })
+    .toBe('queryDatabase');
+  await expect(searches.nth(1)).toHaveValue('queryDatabase');
+
+  // Give a livelock a further debounce cycle's worth of time to keep
+  // flapping before reading the final tally.
+  await page.waitForTimeout(1_000);
+  const navCount = await page.evaluate(
+    () => (window as unknown as { __navCount: number }).__navCount,
+  );
+  expect(navCount).toBeLessThan(10);
+});
+
+test('fgSandwich deep link renders the sandwich pill, and its close control clears the param', async ({
+  page,
+}) => {
+  await page.goto(url('/', { fgSandwich: 'main.queryDatabase' }));
+
+  // FlameGraphMetadata renders the sandwich pill in a wrapper titled with
+  // the sandwiched label — a stable locator that doesn't require driving
+  // the canvas context menu that normally sets a sandwich. Scoped to
+  // .plfg-metadata: the top table's own symbol cell carries the same title.
+  const pill = page.locator('.plfg-metadata').getByTitle('main.queryDatabase');
+  await expect(pill).toBeVisible();
+
+  await pill.getByRole('button', { name: 'Remove sandwich view' }).click();
+
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get('fgSandwich'), {
+      timeout: 5_000,
+    })
+    .toBeNull();
+});
+
 test('the diff view renders the frame that differs between the windows', async ({
   page,
 }) => {
@@ -125,6 +253,24 @@ test('the diff view renders the frame that differs between the windows', async (
     page.getByRole('cell', { name: 'main.slowRegression' }),
   ).toBeVisible();
   await expectCanvasPainted(page.locator('.plfg-canvas-graph canvas').first());
+});
+
+test('the diff view honours a deep-linked fgSearch, instead of the uncontrolled container silently ignoring it', async ({
+  page,
+}) => {
+  await page.goto(
+    url('/diff', {
+      fgSearch: 'queryDatabase',
+      leftFrom: meta.left.start,
+      leftUntil: meta.left.end,
+      rightFrom: meta.right.start,
+      rightUntil: meta.right.end,
+    }),
+  );
+
+  await expect(page.getByRole('textbox', { name: 'Search' })).toHaveValue(
+    'queryDatabase',
+  );
 });
 
 test('the tag explorer breaks the profile down by label', async ({ page }) => {
