@@ -49,7 +49,7 @@ func (p *recorderProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func newTestHandler() (http.Handler, *recorderProxy) {
 	proxy := &recorderProxy{}
 	dist := testDist()
-	return newHandler(dist, []byte(indexHTML), gzipAssets(dist), proxy), proxy
+	return newHandler(dist, []byte(indexHTML), gzipAssets(dist), proxy, nil), proxy
 }
 
 func get(t *testing.T, h http.Handler, target string) *httptest.ResponseRecorder {
@@ -341,6 +341,109 @@ func TestResolvePyroscopeAuth(t *testing.T) {
 	}
 }
 
+// TestResolveTenantControl covers the pin, the allowlist (including
+// trimming and empty-entry handling), the no-op case, and the mutual
+// exclusion Fatalf main enforces at the call site.
+func TestResolveTenantControl(t *testing.T) {
+	cases := []struct {
+		name       string
+		pinFlag    string
+		allowFlag  string
+		wantErr    string // substring; "" means no error is expected
+		wantPin    string
+		wantAllow  map[string]bool
+		wantAllowN bool // true if allowed must be non-nil even when empty
+	}{
+		{
+			name: "neither set: no tenant control at all",
+		},
+		{
+			name:    "pin alone",
+			pinFlag: "tenant-a",
+			wantPin: "tenant-a",
+		},
+		{
+			name:      "allowlist alone",
+			allowFlag: "tenant-a,tenant-b",
+			wantAllow: map[string]bool{"tenant-a": true, "tenant-b": true},
+		},
+		{
+			name:      "allowlist entries are trimmed",
+			allowFlag: " tenant-a , tenant-b ",
+			wantAllow: map[string]bool{"tenant-a": true, "tenant-b": true},
+		},
+		{
+			name:      "an empty entry in the list is ignored, not a tenant named \"\"",
+			allowFlag: "tenant-a,,tenant-b,",
+			wantAllow: map[string]bool{"tenant-a": true, "tenant-b": true},
+		},
+		{
+			name:       "a list of only empty entries yields an empty, non-nil set",
+			allowFlag:  " , ,",
+			wantAllow:  map[string]bool{},
+			wantAllowN: true,
+		},
+		{
+			name:      "both set: contradiction",
+			pinFlag:   "tenant-a",
+			allowFlag: "tenant-a,tenant-b",
+			wantErr:   "-pyroscope-tenant-id and -allowed-tenants",
+		},
+		{
+			// net/http trims a header value's surrounding whitespace on the
+			// wire; resolveTenantControl has to report the same trimmed
+			// value it will actually forward and log, or the two disagree.
+			name:    "a pin with surrounding whitespace is trimmed",
+			pinFlag: " tenant-a ",
+			wantPin: "tenant-a",
+		},
+		{
+			// Trimmed to "", a whitespace-only pin would forward as an EMPTY
+			// X-Scope-OrgID — the multitenancy probe, the opposite of
+			// pinning a tenant — so this is a startup error, not a silent
+			// no-op.
+			name:    "a whitespace-only pin is an error, not a silently-empty pin",
+			pinFlag: "   ",
+			wantErr: "-pyroscope-tenant-id",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			pin, allowed, err := resolveTenantControl(c.pinFlag, c.allowFlag)
+			if c.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected an error containing %q, got nil", c.wantErr)
+				}
+				if !strings.Contains(err.Error(), c.wantErr) {
+					t.Errorf("error %q does not contain %q", err.Error(), c.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if pin != c.wantPin {
+				t.Errorf("pin: got %q, want %q", pin, c.wantPin)
+			}
+			if c.wantAllow == nil && !c.wantAllowN {
+				if allowed != nil {
+					t.Errorf("allowed: got %v, want nil", allowed)
+				}
+				return
+			}
+			if len(allowed) != len(c.wantAllow) {
+				t.Errorf("allowed: got %v, want %v", allowed, c.wantAllow)
+			}
+			for tenant := range c.wantAllow {
+				if !allowed[tenant] {
+					t.Errorf("allowed: missing %q", tenant)
+				}
+			}
+		})
+	}
+}
+
 // captureLog swaps the default logger's output for a buffer for the
 // duration of the test, the same trick quietLogs uses to silence it.
 func captureLog(t *testing.T) *bytes.Buffer {
@@ -519,7 +622,7 @@ func TestAccessLogLine(t *testing.T) {
 		w.WriteHeader(http.StatusTeapot)
 		io.WriteString(w, "hi")
 	})
-	h := withAccessLog(inner)
+	h := withAccessLog(inner, "")
 
 	// The query string can carry a tenant's label matchers, so it must never
 	// reach the log even though the path (no secrets in this app) does.
@@ -537,6 +640,33 @@ func TestAccessLogLine(t *testing.T) {
 	}
 	if strings.Contains(line, "secret-corp") {
 		t.Errorf("log line leaked the query string: %q", line)
+	}
+}
+
+// Under a pin, the director overwrites the outbound X-Scope-OrgID to the
+// pinned value on a cloned request this middleware never sees (it wraps the
+// original), so logging r.Header verbatim would record a visitor value the
+// pin already overrode. The access log has to report the pin instead — what
+// the upstream actually received — even when a visitor supplied (or tried
+// to supply) a different tenant.
+func TestAccessLogRecordsThePinnedTenantNotTheVisitorValue(t *testing.T) {
+	buf := captureLog(t)
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	h := withAccessLog(inner, "pinned-tenant")
+
+	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/Series", nil)
+	req.Header.Set("X-Scope-OrgID", "visitor-chosen-tenant")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	line := buf.String()
+	if !strings.Contains(line, "tenant=pinned-tenant") {
+		t.Errorf("log line %q missing tenant=pinned-tenant", line)
+	}
+	if strings.Contains(line, "visitor-chosen-tenant") {
+		t.Errorf("log line %q recorded the visitor's overridden value", line)
 	}
 }
 
@@ -573,7 +703,7 @@ func TestAccessLogPathIsEscapedAgainstInjection(t *testing.T) {
 	buf := captureLog(t)
 	h := withAccessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
+	}), "")
 
 	req := httptest.NewRequest(http.MethodGet, "/x%0aFAKE%20LINE", nil)
 	rec := httptest.NewRecorder()
@@ -589,7 +719,7 @@ func TestAccessLogOmitsTenantOutsideQuerierPaths(t *testing.T) {
 	buf := captureLog(t)
 	h := withAccessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
+	}), "")
 
 	get(t, h, "/favicon.svg")
 
@@ -604,7 +734,7 @@ func TestAccessLogDefaultStatusIsOK(t *testing.T) {
 	// implicit 200; the wrapper has to report that instead of a bare 0.
 	h := withAccessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		io.WriteString(w, "ok")
-	}))
+	}), "")
 
 	get(t, h, "/healthz")
 
@@ -623,7 +753,7 @@ func TestStatusWriterUnwrapExposesFlush(t *testing.T) {
 		if err := http.NewResponseController(w).Flush(); err != nil {
 			t.Errorf("flush through the wrapped writer: %v", err)
 		}
-	}))
+	}), "")
 	get(t, h, "/healthz")
 }
 
@@ -806,7 +936,7 @@ func TestGzipAssetHeadHasNoBody(t *testing.T) {
 func TestGzipAssetHeadLogsNoPhantomBytes(t *testing.T) {
 	buf := captureLog(t)
 	h, _ := newTestHandler()
-	logged := withAccessLog(h)
+	logged := withAccessLog(h, "")
 
 	req := httptest.NewRequest(http.MethodHead, "/assets/index-abc123.js", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
@@ -950,21 +1080,40 @@ func TestProxiesQueryPaths(t *testing.T) {
 	}
 }
 
+// assertSecurityHeaders checks every header securityHeaderWriter is
+// responsible for. Reused wherever a test needs to confirm a response —
+// the SPA shell, a plain file, a proxied response — carries the full set.
+func assertSecurityHeaders(t *testing.T, path string, h http.Header) {
+	t.Helper()
+	if got := h.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("%s: X-Content-Type-Options got %q, want nosniff", path, got)
+	}
+	csp := h.Get("Content-Security-Policy")
+	for _, want := range []string{"default-src 'self'", "frame-ancestors 'none'", "form-action 'none'"} {
+		if !strings.Contains(csp, want) {
+			t.Errorf("%s: csp %q is missing %q", path, csp, want)
+		}
+	}
+	for _, want := range []struct{ name, value string }{
+		{"Referrer-Policy", "no-referrer"},
+		{"Cross-Origin-Opener-Policy", "same-origin"},
+		{"Cross-Origin-Resource-Policy", "same-origin"},
+		{"Permissions-Policy", "camera=(), microphone=(), geolocation=()"},
+	} {
+		if got := h.Get(want.name); got != want.value {
+			t.Errorf("%s: %s got %q, want %q", path, want.name, got, want.value)
+		}
+	}
+}
+
 func TestSecurityHeaders(t *testing.T) {
 	h, _ := newTestHandler()
 	// Every response, not just the shell: the proxy puts upstream-controlled
-	// bytes on this origin, which is what the CSP is there to contain.
+	// bytes on this origin, which is what the CSP is there to contain. "/" is
+	// the SPA shell, "/favicon.svg" a plain embedded file.
 	for _, path := range []string{"/", "/healthz", "/favicon.svg"} {
 		rec := get(t, h, path)
-		if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
-			t.Errorf("%s: nosniff got %q", path, got)
-		}
-		csp := rec.Header().Get("Content-Security-Policy")
-		for _, want := range []string{"default-src 'self'", "frame-ancestors 'none'"} {
-			if !strings.Contains(csp, want) {
-				t.Errorf("%s: csp %q is missing %q", path, csp, want)
-			}
-		}
+		assertSecurityHeaders(t, path, rec.Header())
 	}
 }
 
@@ -1024,7 +1173,7 @@ func TestProxyForwardsToUpstreamWithItsOwnHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	dist := testDist()
-	h := newHandler(dist, []byte(indexHTML), gzipAssets(dist), newProxy(target, "", ""))
+	h := newHandler(dist, []byte(indexHTML), gzipAssets(dist), newProxy(target, "", "", ""), nil)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost,
@@ -1059,7 +1208,7 @@ func TestProxyErrorKeepsDetailOutOfTheBrowser(t *testing.T) {
 		t.Fatal(err)
 	}
 	dist := testDist()
-	h := newHandler(dist, []byte(indexHTML), gzipAssets(dist), newProxy(target, "", ""))
+	h := newHandler(dist, []byte(indexHTML), gzipAssets(dist), newProxy(target, "", "", ""), nil)
 
 	rec := post(t, h, "/querier.v1.QuerierService/LabelNames")
 	if rec.Code != http.StatusBadGateway {
@@ -1089,7 +1238,7 @@ func TestProxyRejectsOversizedBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	dist := testDist()
-	h := newHandler(dist, []byte(indexHTML), gzipAssets(dist), newProxy(target, "", ""))
+	h := newHandler(dist, []byte(indexHTML), gzipAssets(dist), newProxy(target, "", "", ""), nil)
 
 	body := bytes.Repeat([]byte("x"), 16<<20+1)
 	rec := httptest.NewRecorder()
@@ -1105,11 +1254,167 @@ func TestProxyRejectsOversizedBody(t *testing.T) {
 	}
 }
 
+// newTenantControlTestHandler wires the full newHandler+newProxy stack to a
+// recording upstream, so the allowlist tests below can assert both what
+// never reaches the upstream and — for an allowed tenant — what the
+// upstream actually saw, headers included. Unlike newAuthTestProxy this goes
+// through newHandler's routing, since the allowlist check lives in the
+// forward handler there, ahead of the proxy.
+func newTenantControlTestHandler(t *testing.T, authUser, authPass string, allowed map[string]bool) (h http.Handler, gotHeaders func() http.Header, upstreamCalled func() bool) {
+	t.Helper()
+	var last http.Header
+	var called bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		last = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(upstream.Close)
+	target, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dist := testDist()
+	h = newHandler(dist, []byte(indexHTML), gzipAssets(dist), newProxy(target, authUser, authPass, ""), allowed)
+	return h, func() http.Header { return last }, func() bool { return called }
+}
+
+func TestTenantAllowlistInListTenantReachesTheUpstream(t *testing.T) {
+	h, gotHeaders, upstreamCalled := newTenantControlTestHandler(t, "", "", map[string]bool{"tenant-a": true, "tenant-b": true})
+	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/Series", nil)
+	req.Header.Set("X-Scope-OrgID", "tenant-a")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status: got %d, want 200", rec.Code)
+	}
+	if !upstreamCalled() {
+		t.Fatal("an allowlisted tenant did not reach the upstream")
+	}
+	if tenant := gotHeaders().Get("X-Scope-OrgID"); tenant != "tenant-a" {
+		t.Errorf("X-Scope-OrgID at the upstream: got %q, want tenant-a", tenant)
+	}
+}
+
+func TestTenantAllowlistOutOfListTenantNeverReachesTheUpstream(t *testing.T) {
+	h, _, upstreamCalled := newTenantControlTestHandler(t, "", "", map[string]bool{"tenant-a": true})
+	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/Series", nil)
+	req.Header.Set("X-Scope-OrgID", "tenant-not-on-the-list")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status: got %d, want 403", rec.Code)
+	}
+	if upstreamCalled() {
+		t.Error("a tenant outside the allowlist reached the upstream")
+	}
+}
+
+// The gate must see the same header shape it validates against what the
+// director forwards. Two X-Scope-OrgID lines, one allowed and one not, is
+// malformed/hostile under an allowlist policy — Header.Get only ever sees
+// the first, so checking that alone and forwarding the whole slice would let
+// a second, disallowed tenant ride along underneath an allowed first value.
+// Fail closed: reject outright rather than pick one interpretation.
+func TestTenantAllowlistRejectsMultiValuedXScopeOrgID(t *testing.T) {
+	h, _, upstreamCalled := newTenantControlTestHandler(t, "", "", map[string]bool{"tenant-a": true})
+	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/Series", nil)
+	req.Header["X-Scope-Orgid"] = []string{"tenant-a", "tenant-not-on-the-list"}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status: got %d, want 403", rec.Code)
+	}
+	if upstreamCalled() {
+		t.Error("a multi-valued X-Scope-OrgID reached the upstream")
+	}
+}
+
+// The mirror of the allowlist test above, with no tenant control configured
+// at all: even then, the director must forward exactly one X-Scope-OrgID
+// value, since that is what the allowlist gate (when it IS configured) reads
+// with Header.Get. "Validated" and "forwarded" have to be the same header
+// shape in every configuration, not just when an allowlist happens to be
+// set, or the checked-single/forwarded-many split reopens the instant a
+// fronting proxy or a different upstream reads the header differently than
+// dskit's Header.Get does today.
+func TestProxyDirectorForwardsOnlyASingleXScopeOrgIDValue(t *testing.T) {
+	proxy, gotHeaders := newAuthTestProxy(t, "", "", "")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/LabelNames", nil)
+	req.Header["X-Scope-Orgid"] = []string{"tenant-a", "tenant-b"}
+	proxy.ServeHTTP(rec, req)
+
+	vals := gotHeaders().Values("X-Scope-OrgID")
+	if len(vals) != 1 || vals[0] != "tenant-a" {
+		t.Errorf("X-Scope-OrgID at the upstream: got %#v, want a single value %q", vals, "tenant-a")
+	}
+}
+
+// The multitenancy probe (an absent or explicitly empty X-Scope-OrgID) is
+// not a tenant selection, so the allowlist must not treat it as one — an
+// operator confining a shared instance to a handful of tenants must not
+// accidentally break single-tenant Pyroscope's own probe response.
+func TestTenantAllowlistPassesThroughAnAbsentOrEmptyProbeUnchanged(t *testing.T) {
+	for _, name := range []string{"absent", "empty"} {
+		t.Run(name, func(t *testing.T) {
+			h, gotHeaders, upstreamCalled := newTenantControlTestHandler(t, "", "", map[string]bool{"tenant-a": true})
+			req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/Series", nil)
+			if name == "empty" {
+				req.Header.Set("X-Scope-OrgID", "")
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Errorf("status: got %d, want 200", rec.Code)
+			}
+			if !upstreamCalled() {
+				t.Fatalf("%s X-Scope-OrgID (the multitenancy probe) did not reach the upstream", name)
+			}
+			if name == "empty" {
+				vals := gotHeaders().Values("X-Scope-OrgID")
+				if len(vals) != 1 || vals[0] != "" {
+					t.Errorf("X-Scope-OrgID at the upstream: got %#v, want it present with one empty value", vals)
+				}
+			}
+		})
+	}
+}
+
+// The allowlist and upstream basic auth are independent settings a
+// deployment may combine (a shared, authenticated Grafana Cloud stack
+// confined to a subset of its tenants, say): an allowed tenant's request
+// must still pick up the configured credentials.
+func TestTenantAllowlistComposesWithBasicAuth(t *testing.T) {
+	h, gotHeaders, upstreamCalled := newTenantControlTestHandler(t, "grafana-stack-1", "api-token", map[string]bool{"tenant-a": true})
+	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/Series", nil)
+	req.Header.Set("X-Scope-OrgID", "tenant-a")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if !upstreamCalled() {
+		t.Fatal("an allowlisted tenant did not reach the upstream")
+	}
+	got := gotHeaders()
+	if tenant := got.Get("X-Scope-OrgID"); tenant != "tenant-a" {
+		t.Errorf("X-Scope-OrgID at the upstream: got %q, want tenant-a", tenant)
+	}
+	upstreamReq := &http.Request{Header: http.Header{"Authorization": {got.Get("Authorization")}}}
+	user, pass, ok := upstreamReq.BasicAuth()
+	if !ok || user != "grafana-stack-1" || pass != "api-token" {
+		t.Errorf("upstream Authorization: got user=%q pass=%q ok=%v, want grafana-stack-1/api-token", user, pass, ok)
+	}
+}
+
 // newAuthTestProxy wires newProxy straight to a recording upstream (bypassing
 // newHandler's routing, which is covered elsewhere) so these tests can
 // inspect exactly what the upstream received. gotHeaders reports the last
 // request's headers as the upstream saw them.
-func newAuthTestProxy(t *testing.T, authUser, authPass string) (proxy http.Handler, gotHeaders func() http.Header) {
+func newAuthTestProxy(t *testing.T, authUser, authPass, tenantPin string) (proxy http.Handler, gotHeaders func() http.Header) {
 	t.Helper()
 	var last http.Header
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1121,11 +1426,11 @@ func newAuthTestProxy(t *testing.T, authUser, authPass string) (proxy http.Handl
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newProxy(target, authUser, authPass), func() http.Header { return last }
+	return newProxy(target, authUser, authPass, tenantPin), func() http.Header { return last }
 }
 
 func TestProxyDirectorSetsBasicAuthWhenConfigured(t *testing.T) {
-	proxy, gotHeaders := newAuthTestProxy(t, "grafana-stack-1", "api-token")
+	proxy, gotHeaders := newAuthTestProxy(t, "grafana-stack-1", "api-token", "")
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/LabelNames", nil)
 	proxy.ServeHTTP(rec, req)
@@ -1138,7 +1443,7 @@ func TestProxyDirectorSetsBasicAuthWhenConfigured(t *testing.T) {
 }
 
 func TestProxyDirectorNoAuthorizationWhenNotConfigured(t *testing.T) {
-	proxy, gotHeaders := newAuthTestProxy(t, "", "")
+	proxy, gotHeaders := newAuthTestProxy(t, "", "", "")
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/LabelNames", nil)
 	proxy.ServeHTTP(rec, req)
@@ -1149,7 +1454,7 @@ func TestProxyDirectorNoAuthorizationWhenNotConfigured(t *testing.T) {
 }
 
 func TestProxyDirectorReplacesInboundAuthorizationWhenConfigured(t *testing.T) {
-	proxy, gotHeaders := newAuthTestProxy(t, "grafana-stack-1", "api-token")
+	proxy, gotHeaders := newAuthTestProxy(t, "grafana-stack-1", "api-token", "")
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/LabelNames", nil)
 	// An unauthenticated visitor's own header must not reach an authenticated
@@ -1174,7 +1479,7 @@ func TestProxyDirectorReplacesInboundAuthorizationWhenConfigured(t *testing.T) {
 // passed through, even when no upstream credentials are configured. It never
 // makes it into the fresh header set the director builds in the first place.
 func TestProxyDirectorStripsInboundAuthorizationWhenNotConfigured(t *testing.T) {
-	proxy, gotHeaders := newAuthTestProxy(t, "", "")
+	proxy, gotHeaders := newAuthTestProxy(t, "", "", "")
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/LabelNames", nil)
 	req.Header.Set("Authorization", "Bearer whatever-the-client-sent")
@@ -1193,7 +1498,7 @@ func TestProxyDirectorStripsInboundAuthorizationWhenNotConfigured(t *testing.T) 
 // X-Forwarded-For (which ReverseProxy would otherwise append on its own,
 // hence the non-default RemoteAddr below) is suppressed outright.
 func TestProxyDirectorForwardsOnlyAllowlistedRequestHeaders(t *testing.T) {
-	proxy, gotHeaders := newAuthTestProxy(t, "", "")
+	proxy, gotHeaders := newAuthTestProxy(t, "", "", "")
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/LabelNames", nil)
 	req.Header.Set("Content-Type", "application/json")
@@ -1232,7 +1537,7 @@ func TestProxyDirectorForwardsOnlyAllowlistedRequestHeaders(t *testing.T) {
 // X-Scope-OrgID under multitenancy (e2e/fake-pyroscope.mjs), and never got
 // the chance to.
 func TestProxyDirectorForwardsExplicitlyEmptyXScopeOrgID(t *testing.T) {
-	proxy, gotHeaders := newAuthTestProxy(t, "", "")
+	proxy, gotHeaders := newAuthTestProxy(t, "", "", "")
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/LabelNames", nil)
 	req.Header.Set("X-Scope-OrgID", "")
@@ -1241,6 +1546,60 @@ func TestProxyDirectorForwardsExplicitlyEmptyXScopeOrgID(t *testing.T) {
 	vals := gotHeaders().Values("X-Scope-OrgID")
 	if len(vals) != 1 || vals[0] != "" {
 		t.Errorf("X-Scope-OrgID at the upstream: got %#v, want it present with one empty value", vals)
+	}
+}
+
+// A pinned instance serves exactly one tenant: whatever a visitor puts on
+// the wire must not choose which one the upstream sees.
+func TestProxyDirectorPinOverwritesVisitorSuppliedXScopeOrgID(t *testing.T) {
+	proxy, gotHeaders := newAuthTestProxy(t, "", "", "pinned-tenant")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/LabelNames", nil)
+	req.Header.Set("X-Scope-OrgID", "visitor-chosen-tenant")
+	proxy.ServeHTTP(rec, req)
+
+	if got := gotHeaders().Get("X-Scope-OrgID"); got != "pinned-tenant" {
+		t.Errorf("X-Scope-OrgID at the upstream: got %q, want the pin to overwrite the visitor's value", got)
+	}
+}
+
+// client.ts's multitenancy probe is an explicitly empty X-Scope-OrgID (see
+// TestProxyDirectorForwardsExplicitlyEmptyXScopeOrgID above); on a pinned
+// instance the pin has to win over that too, so the upstream sees the
+// pinned tenant and answers the probe as single-tenant — correct, since a
+// pinned instance has exactly one tenant regardless of what the probe would
+// otherwise have found.
+func TestProxyDirectorPinReplacesEmptyMultitenancyProbe(t *testing.T) {
+	proxy, gotHeaders := newAuthTestProxy(t, "", "", "pinned-tenant")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/LabelNames", nil)
+	req.Header.Set("X-Scope-OrgID", "")
+	proxy.ServeHTTP(rec, req)
+
+	vals := gotHeaders().Values("X-Scope-OrgID")
+	if len(vals) != 1 || vals[0] != "pinned-tenant" {
+		t.Errorf("X-Scope-OrgID at the upstream: got %#v, want a single value %q", vals, "pinned-tenant")
+	}
+}
+
+// A pin and upstream basic auth are independent settings a deployment may
+// combine (a single-tenant Grafana Cloud stack, say): both must apply to
+// the same request.
+func TestProxyDirectorPinComposesWithBasicAuth(t *testing.T) {
+	proxy, gotHeaders := newAuthTestProxy(t, "grafana-stack-1", "api-token", "pinned-tenant")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/LabelNames", nil)
+	req.Header.Set("X-Scope-OrgID", "visitor-chosen-tenant")
+	proxy.ServeHTTP(rec, req)
+
+	got := gotHeaders()
+	if tenant := got.Get("X-Scope-OrgID"); tenant != "pinned-tenant" {
+		t.Errorf("X-Scope-OrgID: got %q, want the pin", tenant)
+	}
+	upstreamReq := &http.Request{Header: http.Header{"Authorization": {got.Get("Authorization")}}}
+	user, pass, ok := upstreamReq.BasicAuth()
+	if !ok || user != "grafana-stack-1" || pass != "api-token" {
+		t.Errorf("upstream Authorization: got user=%q pass=%q ok=%v, want grafana-stack-1/api-token", user, pass, ok)
 	}
 }
 
@@ -1257,7 +1616,7 @@ func TestProxyDirectorNilsRequestTrailer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy := newProxy(target, "", "")
+	proxy := newProxy(target, "", "", "")
 
 	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/LabelNames", nil)
 	req.Trailer = http.Header{"X-Injected-Trailer": {"whatever-a-non-browser-client-attached"}}
@@ -1270,7 +1629,7 @@ func TestProxyDirectorNilsRequestTrailer(t *testing.T) {
 
 // Pins the full wiring end to end: resolvePyroscopeAuth's output has to flow
 // into newProxy for the request to reach the upstream authenticated, so a
-// stub (main always calling newProxy(target, "", "")) could no longer pass
+// stub (main always calling newProxy(target, "", "", "")) could no longer pass
 // every test in this file undetected.
 func TestResolvedCredentialsReachTheUpstreamThroughNewProxy(t *testing.T) {
 	var gotAuthorization string
@@ -1296,7 +1655,7 @@ func TestResolvedCredentialsReachTheUpstreamThroughNewProxy(t *testing.T) {
 		t.Fatal("expected auth to be configured from the URL's userinfo")
 	}
 
-	proxy := newProxy(target, authUser, authPass)
+	proxy := newProxy(target, authUser, authPass, "")
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/LabelNames", nil)
 	proxy.ServeHTTP(rec, req)
@@ -1325,7 +1684,7 @@ func TestModifyResponseFiltersToAllowlistedResponseHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy := newProxy(target, "", "")
+	proxy := newProxy(target, "", "", "")
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/LabelNames", nil)
@@ -1367,7 +1726,7 @@ func TestSecurityHeadersSurviveAnUpstream1xxResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	dist := testDist()
-	h := newHandler(dist, []byte(indexHTML), gzipAssets(dist), newProxy(target, "", ""))
+	h := newHandler(dist, []byte(indexHTML), gzipAssets(dist), newProxy(target, "", "", ""), nil)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/querier.v1.QuerierService/LabelNames", nil)
@@ -1378,12 +1737,10 @@ func TestSecurityHeadersSurviveAnUpstream1xxResponse(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200", rec.Code)
 	}
-	if got := rec.Header().Get("Content-Security-Policy"); got == "" {
-		t.Error("Content-Security-Policy is missing from the final response")
-	}
-	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
-		t.Errorf("X-Content-Type-Options: got %q, want nosniff", got)
-	}
+	// The full header set, not just CSP/nosniff: a proxied response goes
+	// through securityHeaderWriter the same as the shell, so it has to carry
+	// everything the shell does.
+	assertSecurityHeaders(t, "proxied response", rec.Header())
 	for _, absent := range []string{"Link", "Set-Cookie"} {
 		if v := rec.Header().Get(absent); v != "" {
 			t.Errorf("%s reached the client: %q", absent, v)
@@ -1420,7 +1777,7 @@ func TestModifyResponseStripsResponseTrailers(t *testing.T) {
 		t.Fatal(err)
 	}
 	dist := testDist()
-	h := newHandler(dist, []byte(indexHTML), gzipAssets(dist), newProxy(target, "", ""))
+	h := newHandler(dist, []byte(indexHTML), gzipAssets(dist), newProxy(target, "", "", ""), nil)
 
 	// A real listener, not httptest.NewRecorder: trailers are a wire-level
 	// concept (chunked transfer coding), and http.Client is what parses them
