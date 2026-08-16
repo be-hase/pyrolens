@@ -8,14 +8,15 @@ project_name: pyrolens
 dist: .goreleaser-dist
 
 # The binary embeds dist/, so the UI has to exist before any Go build runs.
-# These hooks fire once; the bundle is platform-independent, so every
-# target embeds the same output.
-before:
-  hooks:
-    - corepack enable
-    - yarn install --immutable
-    - yarn build
-
+# It USED to be built right here via a `before.hooks` (corepack/yarn), but
+# that ran vite/yarn — arbitrary package code — inside the release job, next
+# to the job's GITHUB_TOKEN (contents:write + packages:write). It now builds
+# in its own job with no write token (release.yml's `build-ui`) and is
+# downloaded into `dist/` before this runs. Assumption: anyone invoking
+# GoReleaser directly and not through release.yml (`make snapshot`,
+# `goreleaser check`) must run `yarn build` (or `make build`) first —
+# `goreleaser check` needs no `dist/` since it only validates config, but
+# `release`/`build`/snapshot runs do.
 builds:
   - binary: pyrolens
     env:
@@ -41,8 +42,28 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# One SPDX-JSON SBOM per archive (the default target). Shells out to `syft`
+# (goreleaser's default `cmd`), which is not bundled — release.yml installs
+# it (anchore/sbom-action/download-syft) before `goreleaser release` runs.
+# Container images are out of scope here (goreleaser can't catalog its own
+# docker output); the image gets its own SBOM instead, attached via
+# buildx's `--sbom` (dockers_v2's `sbom:` field, on by default).
+sboms:
+  - artifacts: archive
+
 release:
-  draft: false
+  # Draft, not published outright: a draft release's assets are not publicly
+  # reachable, so this buys a window between GoReleaser uploading the
+  # archives here and release.yml attesting them (actions/attest-build-
+  # provenance, after this step) — nothing the README calls "attested"
+  # is downloadable before it actually is. release.yml un-drafts it
+  # (`gh release edit --draft=false`) as its last step, once that
+  # attestation exists. The image has no equivalent gate: `docker buildx
+  # build --push` (below) makes it public in this same GoReleaser run,
+  # before its attestation step runs — see the README's Supply chain
+  # section for the resulting (deliberately different) guarantee per
+  # artifact kind.
+  draft: true
   # A `vX.Y.Z-rc.1` tag passes release.yml's semver gate on purpose (see its
   # comment), so this has to mark it as such itself — otherwise an RC becomes
   # the repo's "Latest release" on GitHub.
@@ -76,3 +97,10 @@ dockers_v2:
       org.opencontainers.image.revision: '{{ .FullCommit }}'
       org.opencontainers.image.source: https://github.com/be-hase/pyrolens
       org.opencontainers.image.licenses: Apache-2.0
+
+# One line per pushed image/manifest: "<digest>  <name:tag>", the same shape
+# checksums.txt uses. release.yml feeds this straight to
+# actions/attest-build-provenance (subject-checksums) so the pushed image
+# gets a provenance attestation without hand-parsing goreleaser's output.
+docker_digest:
+  name_template: digests.txt
