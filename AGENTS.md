@@ -82,6 +82,10 @@ the binaries and the image.
   `X-Scope-OrgID` when a tenant is set, int64-as-string normalised.
 - `src/hooks/` — fetch-and-render-state hooks. `src/views/` — the four
   views. `src/components/` — app UI, with `core/` holding the primitives.
+  `src/components/TimeRangePicker.tsx` also hosts the global keyboard
+  shortcuts; `src/hooks/useFlameGraphUrlState.ts` lifts the flame graph's
+  search/sandwich into the URL; `src/clipboard.ts` is the copy helper with
+  the insecure-context fallback.
 - `src/components/flamebearer.ts` — Pyroscope's wire format to the columnar
   frame the flame graph consumes.
 - `src/lib/flamegraph/` — **vendored**; see its `VENDORED.md` before touching
@@ -121,6 +125,24 @@ fine in a quick test.
   That is what makes Run a real refresh for a relative range. It is a cached
   snapshot read through `useSyncExternalStore`, so renders stay pure; do not
   call `Date.now()` during render to paper over staleness.
+- **Every param write is therefore also a refresh** — groupBy, sort and
+  search commits all refire relative-range fetches, so typed input never
+  writes per keystroke: keep a local draft and debounce one
+  replace-navigation per burst (the flame graph search is the model).
+- **When two components write the same param, each may publish only once its
+  debounce has settled on its own draft.** The Comparison panes share
+  `fgSearch`; a writer that navigated on any draft/URL mismatch ping-ponged
+  the other pane's value away in an infinite replaceState loop, and
+  clobbered the entry Back had just reached.
+- **Constructed URLs keep relative state relative.** Baking `now-1h` into
+  absolute ms silently kills auto-refresh, and the NavBar carries params
+  across views, so a frozen window compounds. `previousPeriodParams` /
+  `swappedPaneParams` show the pattern (their comments cover the fallback
+  rules); do the same in anything new that writes ranges.
+- **A pane param that is absent inherits; an empty string overrides.**
+  `params.get('leftQuery') ?? mainQuery` makes absence mean "follow the main
+  query" — never materialize resolved values where absence was the point,
+  and never write `''` where it will be read as an override.
 - **The tenant header is synced outside React.** A module-level listener on
   `popstate` and `pyroscope:navigate` calls `setTenant()` before any effect
   runs, so nothing can be requested against the previous tenant. Do not move
@@ -147,6 +169,14 @@ fine in a quick test.
   re-checks `signal.aborted` before touching state** — success paths
   included, or rapid navigation writes a superseded response over the current
   one. `abort()` does nothing to a response that has already been parsed.
+- **`retry()` keeps both invariants above**: the click-to-effect gap still
+  counts as loading, and data validity stays per-key (a retry shows the
+  previous answer while reloading). The mechanism is documented in
+  `useFetched`'s header.
+- **Auto-refresh must not abort work it caused** — a query slower than the
+  tick interval would never complete. Ticks skip while `fetchesInFlight()`
+  (client.ts) is nonzero; anything else that navigates on a timer should do
+  the same.
 
 ### Building a query
 
@@ -158,6 +188,27 @@ fine in a quick test.
 - A malformed query is not the same as an empty one; `isMalformedQuery` is
   what tells the user their query was ignored rather than silently doing
   nothing.
+- **The `profile_type` pseudo-label has one shared assessment**
+  (`assessProfileType`), and its three readers — `malformedQueryReason`,
+  `splitQuery`, `parseQuery` — agree by construction. When they each
+  re-derived their own notion, a query could be reported as ignored while
+  its fetch still ran with a "last one wins" value. The user-facing message
+  (`PROFILE_TYPE_MESSAGE`) fires on the same verdict but its wording is
+  hand-maintained — keep it in sync when the rules change.
+
+### Keyboard shortcuts and the clipboard
+
+- Every binding (`y`, the `t` sequences) shares one guarded keydown listener
+  in `TimeRangePicker.tsx`, registered once and reading current state
+  through a ref — an effect keyed on `range` re-registered on every
+  auto-refresh tick and disarmed the sequence being typed.
+- **The clipboard is untrusted, asynchronous input.** `t v` parses strictly
+  and applies a settled read only if the URL still equals the one captured
+  at dispatch — a tick passes, a real navigation discards, with no timing
+  window. The parse rules and their reasons live on `parseClipboardTimeValue`
+  and `pasteRange`.
+- `navigator.clipboard` exists only in secure contexts; writes fall back
+  (src/clipboard.ts), reads have no fallback and fail with visible feedback.
 
 ### Rendering
 
@@ -191,6 +242,16 @@ fine in a quick test.
   failing.
 - The binary is PID 1 in the container, so it drains on SIGTERM rather than
   dropping in-flight queries mid-response.
+- **Asset files serve identically on both encodings**: gzip goes through
+  `http.ServeContent`, so HEAD, Range and preconditions match the identity
+  path — a hand-rolled `w.Write(gz)` diverged on all three — and
+  `/index.html` keeps its canonical redirect on both, or an intermediary
+  caches a stale shell past a redeploy. The SPA-shell identity path is the
+  one remaining raw `Write`.
+- **The access log escapes paths** (an unauthenticated caller could forge
+  log lines), never logs query strings (they carry tenant label matchers),
+  and its writer wrapper must expose `Unwrap` or the proxy's per-write flush
+  silently dies.
 
 ## Verifying a change
 
@@ -207,6 +268,14 @@ whatever it is sent, so check what was actually requested through
 `upstreamLog` rather than only that the screen looks right. Several tests
 here once passed against a view that rendered nothing, because the string
 they waited for was a permanent NavBar label.
+
+Two more lessons in the same family. **A wire-shape change needs the wire
+observed**: the upstream ignores unknown request fields, so a misplaced
+field no-ops invisibly and client-only tests prove the code agrees with
+itself — extend the fake's request log and assert through `upstreamLog` (as
+`maxNodes` does). And **pin the wiring, not just the units**: every suite
+once passed with `retry={undefined}` in every view — a view-level jsdom
+test driving URL → hook → mocked fetch is cheap and catches exactly that.
 
 It does not replace looking at the thing. It cannot tell you a chart is
 mis-scaled, a colour is unreadable, or a layout broke, and its fixtures are a
