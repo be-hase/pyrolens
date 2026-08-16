@@ -234,6 +234,12 @@ fine in a quick test.
 - The proxy's error detail goes to the log, not to the browser.
 - Requests are forwarded with the upstream's `Host`, so name-based routing
   (an ingress, Grafana Cloud) reaches the right backend.
+- **The proxy forwards an allowlist of headers, both directions.** The RPC
+  allowlist decides which paths reach the upstream; the header allowlist
+  decides which headers do — a fronting proxy's cookies and tokens, the
+  visitor's IP and fingerprint stay on our side, and the upstream's
+  Set-Cookie never reaches the browser. Adding a header the UI needs means
+  adding it in `newProxy`, which is the point.
 - **A missing file 404s; only view routes fall back to the SPA shell.**
   Anything under `assets/`, and anything whose last path segment contains a
   dot, is a file request. Falling back there hands the browser HTML with a

@@ -77,12 +77,15 @@ the UI embedded, no runtime dependencies.
 
 Flags / env of the server binary:
 
-| Flag             | Env             | Default                 |                         |
-| ---------------- | --------------- | ----------------------- | ----------------------- |
-| `-listen`        | `LISTEN`        | `:4041`                 | address to listen on    |
-| `-pyroscope-url` | `PYROSCOPE_URL` | `http://localhost:4040` | Pyroscope server to use |
-| `-log-requests`  | `LOG_REQUESTS`  | `false`                 | log one line per request (method, path, status, duration, bytes, and the tenant header for querier calls) |
-| `-version`       | —               | —                       | print the version and exit |
+| Flag                        | Env                       | Default                 |                         |
+| --------------------------- | ------------------------- | ------------------------ | ----------------------- |
+| `-listen`                   | `LISTEN`                  | `:4041`                 | address to listen on    |
+| `-pyroscope-url`            | `PYROSCOPE_URL`           | `http://localhost:4040` | Pyroscope server to use |
+| `-pyroscope-username`       | `PYROSCOPE_USERNAME`      | —                        | basic auth username for the Pyroscope server |
+| `-pyroscope-password`       | `PYROSCOPE_PASSWORD`      | —                        | basic auth password for the Pyroscope server |
+| `-pyroscope-password-file`  | `PYROSCOPE_PASSWORD_FILE` | —                        | path to a file holding the basic auth password (for a mounted secret); mutually exclusive with `-pyroscope-password` |
+| `-log-requests`             | `LOG_REQUESTS`            | `false`                  | log one line per request (method, path, status, duration, bytes, and the tenant header for querier calls) |
+| `-version`                  | —                         | —                        | print the version and exit |
 
 The server embeds the built SPA and reverse-proxies
 `/querier.v1.QuerierService/*` to the Pyroscope server, so the browser talks
@@ -93,6 +96,62 @@ through pyrolens.
 
 The embedded assets are served gzip-compressed whenever the browser accepts
 it — no flag needed, it's automatic.
+
+### Authenticated upstreams (Grafana Cloud)
+
+If the Pyroscope behind pyrolens requires basic auth — Grafana Cloud's
+hosted Pyroscope does, with the stack ID as the username and an API token as
+the password — give it credentials one of two ways:
+
+- Embed them in `-pyroscope-url` (`https://user:pass@host`), or
+- Set `-pyroscope-username` / `-pyroscope-password` (or
+  `-pyroscope-password-file` for a mounted secret) explicitly.
+
+**The username and password must come from the same source.** Setting any
+of `-pyroscope-username`/`-pyroscope-password`/`-pyroscope-password-file`
+makes those flags win over the URL's userinfo *entirely* — pyrolens does not
+combine a flag-sourced credential with a URL-sourced one (a URL username
+plus a file-sourced password, say). `-pyroscope-password` and
+`-pyroscope-password-file` are mutually exclusive, an empty password file is
+rejected by name, and a username set without a password (or vice versa, from
+whichever source is in play) refuses to start — half-configured auth would
+otherwise send unauthenticated requests to the upstream with nothing to say
+so. A username may not contain `:`, which is ambiguous with the
+username/password separator.
+
+**Use `https://` for an authenticated upstream.** Basic auth sends the
+credential in every request; over plain `http://` to anything other than
+localhost, that is the token on the wire in the clear. pyrolens warns loudly
+at startup if it detects this (it does not refuse to start, since testing
+against a local, non-TLS Pyroscope with auth turned on is legitimate), but
+the credential should not cross a real network unencrypted.
+
+**The proxy forwards an explicit header allowlist, not whatever arrived.**
+Outbound, only `Content-Type`, `X-Scope-OrgID` and `Accept-Encoding` are
+copied from the visitor's request, plus `Authorization` set by pyrolens
+itself when upstream credentials are configured — never the visitor's own
+(one exception outside pyrolens's control: Go's own HTTP client re-adds a
+fixed `Te: trailers`, with no visitor-controlled data, when the inbound
+request happened to carry one — a browser's `fetch` cannot). A visitor's
+cookies (a fronting proxy's own SSO session, say), browser fingerprint
+headers and IP address (`X-Forwarded-For`) never reach Pyroscope. See
+Security below for the same allowlisting in the other direction.
+
+Grafana Cloud recipe, with a token file mounted at `/etc/pyrolens/token`.
+Find `<cloud-profiles-url>` and `<stack-id>` on the stack's "Pyroscope"
+connection details page in Grafana Cloud, and generate the token as a Cloud
+Access Policy token scoped to `profiles:read` — a write-only token is
+rejected by Pyroscope with 403:
+
+```sh
+PYROSCOPE_URL=https://<cloud-profiles-url> \
+PYROSCOPE_USERNAME=<stack-id> \
+PYROSCOPE_PASSWORD_FILE=/etc/pyrolens/token \
+  ./pyrolens
+```
+
+This only authenticates pyrolens to Pyroscope. It does not authenticate
+visitors to pyrolens — see Security below.
 
 ### Security
 
@@ -105,6 +164,14 @@ authenticates your other internal tools.
 parameter that becomes the `X-Scope-OrgID` header, so a user can read any
 tenant by editing the address bar. Treat it as a convenience for people who
 are already allowed to see every tenant, not as a permission check.
+
+**Headers are proxied through an explicit allowlist, in both directions.**
+The proxy does not transparently forward whatever headers arrived: a
+visitor's cookies (a fronting SSO's session cookie, say), `Authorization`,
+and IP address never reach the Pyroscope upstream, and an upstream (or a
+load balancer in front of it) setting `Set-Cookie` never reaches the
+browser. Only what pyrolens's own client actually needs crosses either
+direction.
 
 Only that one path prefix is proxied; anything else is served from the
 embedded UI, and a proxied request has to carry a canonical path.
