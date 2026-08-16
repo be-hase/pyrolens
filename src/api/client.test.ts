@@ -10,6 +10,7 @@ import {
 import {
   checkMultitenancy,
   fetchDiffFlamegraph,
+  fetchesInFlight,
   fetchFlamegraph,
   fetchGroupedTimelines,
   fetchLabelNames,
@@ -37,7 +38,8 @@ interface Call {
 }
 
 let calls: Call[] = [];
-let reply: (call: Call) => Response;
+// Promise-returning too, so fetchesInFlight tests can hold a request open.
+let reply: (call: Call) => Response | Promise<Response>;
 
 const json = (value: unknown, status = 200) =>
   new Response(JSON.stringify(value), {
@@ -194,6 +196,48 @@ describe('rpc transport', () => {
     await assert.rejects(fetchLabelNames(['{}'], 1, 2), {
       message: 'LabelNames failed: HTTP 500',
     });
+  });
+});
+
+// --- in-flight tracking --------------------------------------------------
+
+function deferred<T>() {
+  let settle!: (value: T) => void;
+  const promise = new Promise<T>((resolve) => (settle = resolve));
+  return { promise, settle };
+}
+
+describe('fetchesInFlight', () => {
+  it('is 0 at rest', () => {
+    assert.equal(fetchesInFlight(), 0);
+  });
+
+  it('counts a pending rpc, then drops back to 0 once it resolves', async () => {
+    const pending = deferred<Response>();
+    reply = () => pending.promise;
+
+    const call = fetchLabelNames(['{}'], 1, 2);
+    // The fetch stub's promise chain needs a turn of the microtask queue to
+    // register the call before the counter reflects it.
+    await Promise.resolve();
+    assert.equal(fetchesInFlight(), 1);
+
+    pending.settle(json({ names: [] }));
+    await call;
+    assert.equal(fetchesInFlight(), 0);
+  });
+
+  it('drops back to 0 after a rejection too', async () => {
+    const pending = deferred<Response>();
+    reply = () => pending.promise;
+
+    const call = fetchLabelNames(['{}'], 1, 2);
+    await Promise.resolve();
+    assert.equal(fetchesInFlight(), 1);
+
+    pending.settle(json({ code: 'internal' }, 500));
+    await assert.rejects(call);
+    assert.equal(fetchesInFlight(), 0);
   });
 });
 

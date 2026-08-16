@@ -264,6 +264,33 @@ test('`t c` copies the range as Grafana JSON — relative as-is, absolute as ISO
   expect(params().get('until')).toBe(String(Date.parse(toIso)));
 });
 
+// The picker is a core/Select whose trigger is named for screen readers as
+// "Refresh interval: <value>" — locate it by that name, which also pins the
+// accessible naming itself.
+const refreshTrigger = (page: Page) =>
+  page.getByRole('button', { name: /^Refresh interval/ });
+const openRefreshPicker = (page: Page) => refreshTrigger(page).click();
+
+test('the refresh picker writes the chosen interval to the URL, and Off removes it', async ({
+  page,
+}) => {
+  // The unit tests (src/components/RefreshPicker.test.tsx) own the actual
+  // ticking behaviour with fake timers; a real 10s+ wait here would only add
+  // flake for something already covered, so this just checks the URL/label
+  // round trip a click produces.
+  await page.goto(url('/'));
+  await openRefreshPicker(page);
+  await page.getByRole('option', { name: '30s' }).click();
+
+  const params = () => new URL(page.url()).searchParams;
+  expect(params().get('refresh')).toBe('30s');
+  await expect(refreshTrigger(page)).toHaveText('30s');
+
+  await openRefreshPicker(page);
+  await page.getByRole('option', { name: 'Off' }).click();
+  expect(params().has('refresh')).toBe(false);
+});
+
 test('the tag explorer switches the label it groups by', async ({ page }) => {
   await page.goto(url('/explore', { groupBy: 'region' }));
   await expect(page.locator('.tag-explorer-table')).toBeVisible();

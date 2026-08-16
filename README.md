@@ -109,6 +109,7 @@ All state is carried in query parameters; every view is shareable.
 | `tenant`                                           | tenant ID, sent as `X-Scope-OrgID` (multi-tenant Pyroscope only)     |
 | `query`                                            | label selector incl. `profile_type`, e.g. `{service_name="x", ...}`  |
 | `from` / `until`                                   | main time range — `now-1h`-style relative or unix-ms absolute        |
+| `refresh`                                          | auto-refresh interval: `10s` \| `30s` \| `1m` \| `5m`; anything else means off |
 | `leftQuery` / `leftFrom` / `leftUntil` (+ `right…`) | Comparison & Diff pane selections; default to `query` / range halves |
 | `groupBy`                                          | Tag Explorer grouping label                                          |
 | `sort`                                             | Tag Explorer breakdown table sort: `avg` or `max` (default: Share/sum) |
@@ -128,6 +129,10 @@ insecure one, the same one `copy absolute link` uses, which can still fail
 depending on the browser. Grafana's rounded relative ranges (`now/d` and the
 like) are not supported in either direction: pyrolens URLs cannot express
 them, so pasting one reports "Paste failed".
+
+The refresh picker next to the time range control repeats the current view on
+the chosen interval — only while the range is relative and ending at "now",
+and paused whenever the tab is in the background.
 
 ## Development
 

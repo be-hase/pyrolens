@@ -483,12 +483,12 @@ export function TimeRangePicker({
   // the user has already navigated elsewhere (or after unmount), and a
   // navigate() from that resolution would silently override whatever they
   // did next. Bumped for every new paste (invalidating a still-pending
-  // earlier one) and by the keydown effect's own 'pyroscope:navigate'/
-  // 'popstate' listeners below, registered for exactly this — the effect's
-  // *cleanup* also bumps it, but cleanup is a passive effect that runs after
-  // a navigation already committed, leaving a window where a readText()
-  // settling in between would still see the old generation as current. The
-  // cleanup bump stays too, for unmount (which fires no navigation event).
+  // earlier one) and in the keydown effect's unmount cleanup (which fires no
+  // navigation event of its own). A *real* navigation in between — a preset
+  // click, Back/Forward — is deliberately not caught here: this alone cannot
+  // tell that apart from an auto-refresh tick, which calls navigate() too but
+  // leaves the URL byte-identical. See pasteRange's own comment below for how
+  // that distinction is actually made.
   const pasteGeneration = useRef(0);
 
   // Same previous-value-during-render pattern as useEditBuffer: from/until
@@ -547,6 +547,18 @@ export function TimeRangePicker({
     [],
   );
 
+  // Keeps `range`/`from`/`until` available to the keydown effect below
+  // without that effect re-registering on every navigation — see its own
+  // comment for why re-registering is actively wrong here, not just
+  // wasteful. Same ref-through-a-committed-effect idiom as `loadRef` in
+  // src/hooks/useFetched.ts: no deps, so it runs after every render, and it
+  // is declared before the keydown effect so the ref is already current by
+  // the time any handler that effect registers could possibly read it.
+  const stateRef = useRef({ range, from, until });
+  useEffect(() => {
+    stateRef.current = { range, from, until };
+  });
+
   // Bindings, all sharing one keydown listener: `y` (GitHub's canonical-URL
   // mnemonic) switches the range to absolute; Grafana's `t` sequences are
   // kept as aliases for muscle memory carried over from there — `t a` also
@@ -556,25 +568,28 @@ export function TimeRangePicker({
   // back/forward by half its span. Zoom and shift write absolute bounds too,
   // the same contract as `t a`: Grafana's own zoom/shift always resolves to
   // an absolute range rather than leaving a relative one that keeps
-  // drifting underneath the view it produced. Re-registers whenever `range`,
-  // `from` or `until` change so the handler always closes over what is
-  // currently on screen rather than a snapshot from whenever the listener
-  // was first attached; pressing a binding while already on the range it
-  // would produce writes a byte-identical URL, which navigate() already
-  // turns into a no-op replaceState (see src/urlState.ts) rather than a new
-  // history entry.
+  // drifting underneath the view it produced. Pressing a binding while
+  // already on the range it would produce writes a byte-identical URL, which
+  // navigate() already turns into a no-op replaceState (see src/urlState.ts)
+  // rather than a new history entry.
   //
-  // `t ...` is tracked as a pending-prefix ref rather than component state,
-  // so re-renders (every keystroke of the eventual sequence is one) don't
-  // reset it. The ref does *not* survive this effect re-registering, though:
-  // the cleanup below disarms it on every dep change, same as on unmount.
-  // That is intentional rather than incidental — the deps only change on a
-  // navigation, and a navigation cannot happen between two keystrokes of a
-  // sequence the user is still typing, so resetting here only ever catches a
-  // prefix left armed by whatever navigated (a click, another shortcut) and
-  // never a legitimate one. `pasteGeneration` (above) needs the same
-  // invalidation on a navigation, but *not* only through this cleanup — see
-  // the dedicated listeners registered alongside the keydown one below.
+  // Registered ONCE, with no deps — every handler below reads `range`/
+  // `from`/`until` through `stateRef` rather than closing over the props
+  // directly. This effect used to re-register on `[range, from, until]`, on
+  // the theory that a navigation cannot happen between two keystrokes of a
+  // sequence the user is still typing. Auto-refresh broke that theory: it
+  // calls navigate() every tick even when the URL does not change, which
+  // still produces a new `range` object and so still re-ran this effect —
+  // disarming a `t` the user had already pressed, and (see pasteRange below)
+  // discarding an in-flight `t v` that had done nothing wrong. Registering
+  // once means a tick no longer touches this effect at all, and the cleanup
+  // (which still disarms `tPending` and clears `tTimeout`) now only runs at
+  // true unmount.
+  //
+  // `t ...` is still tracked as a pending-prefix ref rather than component
+  // state, so re-renders (every keystroke of the eventual sequence is one)
+  // don't reset it; its own `tTimeout` is what bounds how long a lone `t`
+  // stays armed.
   const tPending = useRef(false);
   const tTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
@@ -599,10 +614,12 @@ export function TimeRangePicker({
           !!target?.isContentEditable
         );
       };
-      const absolute = () =>
+      const absolute = () => {
+        const { range } = stateRef.current;
         navigate({
           set: { from: String(range.start), until: String(range.end) },
         });
+      };
 
       // The trigger button's transient label is shared by `t c`'s outcome and
       // `t v`'s failure. Both directions are guarded by triggerCopyGeneration:
@@ -635,6 +652,7 @@ export function TimeRangePicker({
       // (2026-11-01 01:30 America/New_York happens twice; its UTC instant
       // does not).
       const copyRange = () => {
+        const { range, from, until } = stateRef.current;
         const untilValue = until || 'now';
         const payload = {
           from: isRelative(from) ? from : new Date(range.start).toISOString(),
@@ -661,17 +679,32 @@ export function TimeRangePicker({
       // insecure deployment reports the same "Paste failed" as a bad parse
       // rather than pretending nothing was pressed.
       //
-      // `generation` guards against a stale navigate(): readText() can settle
-      // after the user has already navigated elsewhere — a preset click, the
-      // popstate from Back, another shortcut — or after unmount, and a
-      // navigate() from that late arrival would silently override whatever
-      // happened since. `triggerGeneration` is a second, independent capture
-      // for the *label*: a newer `t c` reporting "Copied"/"Copy failed" while
-      // this read is still in flight must not be overwritten by this paste's
-      // late "Paste failed" (see the comment on failPaste above) — captured
-      // at dispatch, before either async path below can run, since nothing
-      // else can move triggerCopyGeneration between here and readText()
-      // actually starting.
+      // Staleness is checked two ways, and a real navigation is not one of
+      // them any more. `generation` still guards "a newer paste superseded
+      // me" (another `t v` fired before this one settled) and "the component
+      // unmounted" (bumped in the effect's own cleanup, which now only runs
+      // at true unmount). What used to also bump it — a 'pyroscope:navigate'/
+      // 'popstate' listener firing on *any* navigate(), including an
+      // auto-refresh tick that leaves the URL untouched — is gone: it could
+      // not tell a tick apart from a real navigation, so it discarded a
+      // paste the user had every reason to expect to land. Telling them
+      // apart is `dispatchUrl`'s job instead: it captures the URL at the
+      // moment `t v` was pressed, and the callback below only proceeds if
+      // that URL still matches when readText() settles. A tick changes
+      // nothing about the URL, so the comparison passes and the paste
+      // applies — correctly, since the range on screen has not moved. A
+      // preset click, Back/Forward, or any other real navigation changes the
+      // URL, so the comparison fails and the paste is discarded, the same
+      // protection the old listeners gave for that case but checked
+      // synchronously against the live location instead of through an event
+      // that could arrive either before or after this callback runs — no
+      // timing window either way. `triggerGeneration` is a separate capture
+      // for the *label*: a newer `t c` reporting "Copied"/"Copy failed"
+      // while this read is still in flight must not be overwritten by this
+      // paste's late "Paste failed" (see the comment on failPaste above) —
+      // captured at dispatch, before either async path below can run, since
+      // nothing else can move triggerCopyGeneration between here and
+      // readText() actually starting.
       const pasteRange = () => {
         if (!navigator.clipboard?.readText) {
           // Synchronous: nothing else can have run since this call started,
@@ -682,10 +715,14 @@ export function TimeRangePicker({
         }
         const generation = ++pasteGeneration.current;
         const triggerGeneration = triggerCopyGeneration.current;
+        const dispatchUrl = window.location.pathname + window.location.search;
+        const stale = () =>
+          generation !== pasteGeneration.current ||
+          window.location.pathname + window.location.search !== dispatchUrl;
         navigator.clipboard
           .readText()
           .then((text) => {
-            if (generation !== pasteGeneration.current) return;
+            if (stale()) return;
             const parsed = parseClipboardRange(text);
             if (!parsed) {
               if (triggerGeneration === triggerCopyGeneration.current) {
@@ -696,7 +733,7 @@ export function TimeRangePicker({
             navigate({ set: { from: parsed.from, until: parsed.until } });
           })
           .catch(() => {
-            if (generation !== pasteGeneration.current) return;
+            if (stale()) return;
             if (triggerGeneration === triggerCopyGeneration.current) {
               failPaste();
             }
@@ -707,6 +744,7 @@ export function TimeRangePicker({
       // put. Rounded to integers because span/2 need not be, and the URL
       // bounds are read back as ms.
       const zoomOut = () => {
+        const { range } = stateRef.current;
         const span = range.end - range.start;
         const half = span / 2;
         navigate({
@@ -720,6 +758,7 @@ export function TimeRangePicker({
       // `t ArrowLeft`: shift the window back by half its span, keeping the
       // span itself unchanged.
       const shiftBack = () => {
+        const { range } = stateRef.current;
         const span = range.end - range.start;
         const half = span / 2;
         navigate({
@@ -737,6 +776,7 @@ export function TimeRangePicker({
       // "now" has nowhere to shift forward into, so it is a no-op rather
       // than silently shrinking the span by clamping only one side of it.
       const shiftForward = () => {
+        const { range, until } = stateRef.current;
         // `range.end` is a render-time snapshot of "now" for a relative
         // until — by the time this handler runs, the real Date.now() below
         // has already advanced past it, so `range.end >= now` reads false
@@ -805,28 +845,21 @@ export function TimeRangePicker({
         rearm();
       }
     };
-    // Bumps pasteGeneration on the same synchronous events navigate()
-    // dispatches (see src/urlState.ts's NAV_EVENT — 'popstate' covers
-    // Back/Forward, which navigate() does not go through) — the same
-    // "outside React, before any effect" pattern App.tsx's tenant-header sync
-    // uses, and for the same reason: this effect's own cleanup only runs as a
-    // passive effect *after* React commits the re-render a navigation
-    // triggers, which is too late to catch a readText() that settles in that
-    // gap.
-    const bumpPasteGeneration = () => {
-      pasteGeneration.current += 1;
-    };
     window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('pyroscope:navigate', bumpPasteGeneration);
-    window.addEventListener('popstate', bumpPasteGeneration);
+    // No deps means this cleanup only runs at true unmount, not on every
+    // navigation — see the comment above `tPending` for why that is the
+    // fix rather than a shortcut. `disarm()` here is therefore only ever
+    // clearing a sequence the user genuinely abandoned by navigating away
+    // some other way (a click, another shortcut), never one still being
+    // typed. Bumping `pasteGeneration` here covers unmount for `t v`, the
+    // one case `dispatchUrl` in pasteRange cannot: there is no "current URL"
+    // to compare against once the component watching it is gone.
     return () => {
       window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('pyroscope:navigate', bumpPasteGeneration);
-      window.removeEventListener('popstate', bumpPasteGeneration);
       disarm();
       pasteGeneration.current += 1;
     };
-  }, [range, from, until]);
+  }, []);
 
   // Bakes the resolved bounds into the current URL and copies that, without
   // navigating: the recipient sees the window this screen showed, while this
