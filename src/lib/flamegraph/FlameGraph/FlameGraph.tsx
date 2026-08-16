@@ -195,6 +195,21 @@ const FlameGraph = ({
         direction={'children'}
       />
     );
+  } else if (sandwichItem) {
+    // getSandwichLevels found no frame with this label — a deep-linked or
+    // shared-across-panes fgSandwich that does not exist in this profile
+    // (wrong symbol, or a switch of profile type/service while sandwiched),
+    // not a rendering bug. Left blank this reads as broken data (the
+    // metadata pill above still shows "0 | 0 samples"); say so explicitly.
+    // The pill's Reset/remove-sandwich control is unaffected — it lives in
+    // FlameGraphMetadata below, not in this branch — and the URL param is
+    // deliberately left alone: it may still be valid for the other
+    // Comparison pane's profile. See VENDORED.md.
+    canvas = (
+      <div className="plfg-sandwich-empty">
+        No frames match this symbol in this profile.
+      </div>
+    );
   }
 
   return (

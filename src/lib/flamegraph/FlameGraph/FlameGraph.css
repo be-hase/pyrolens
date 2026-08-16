@@ -31,3 +31,12 @@
 .plfg-sandwich-marker-icon {
   vertical-align: baseline;
 }
+
+/* Stands in for the canvas when a sandwich selection matches nothing in the
+ * current profile, so the area isn't left blank (see VENDORED.md). */
+.plfg-sandwich-empty {
+  padding: var(--space-4) 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  text-align: center;
+}

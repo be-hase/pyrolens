@@ -83,6 +83,22 @@ export type Props = {
    * Whether or not to keep any focused item when the profile data changes.
    */
   keepFocusOnDataChange?: boolean;
+
+  /**
+   * Controlled search text. When provided (together with onSearchChange),
+   * the component reads/writes this instead of its own internal state — see
+   * VENDORED.md's local-fixes section.
+   */
+  search?: string;
+  onSearchChange?: (search: string) => void;
+
+  /**
+   * Controlled sandwich selection. When onSandwichChange is provided, the
+   * component reads/writes this instead of its own internal state — see
+   * VENDORED.md's local-fixes section.
+   */
+  sandwichItem?: string | undefined;
+  onSandwichChange?: (item: string | undefined) => void;
 };
 
 const FlameGraphContainer = ({
@@ -98,6 +114,10 @@ const FlameGraphContainer = ({
   disableCollapsing,
   keepFocusOnDataChange,
   getExtraContextMenuButtons,
+  search: controlledSearch,
+  onSearchChange,
+  sandwichItem: controlledSandwichItem,
+  onSandwichChange,
 }: Props) => {
   const theme = useTheme();
 
@@ -105,14 +125,58 @@ const FlameGraphContainer = ({
 
   const [rangeMin, setRangeMin] = useState(0);
   const [rangeMax, setRangeMax] = useState(1);
-  const [search, setSearch] = useState('');
+  const [internalSearch, setInternalSearch] = useState('');
+  const search = controlledSearch ?? internalSearch;
+  const setSearch = useCallback(
+    (value: string) => {
+      onSearchChange?.(value);
+      if (controlledSearch === undefined) {
+        setInternalSearch(value);
+      }
+    },
+    [controlledSearch, onSearchChange],
+  );
   const [selectedView, setSelectedView] = useState<SelectedView>(
     SelectedView.Both,
   );
   const [sizeRef, { width: containerWidth }] = useMeasure<HTMLDivElement>();
   const [textAlign, setTextAlign] = useState<TextAlign>('left');
   // This is a label of the item because in sandwich view we group all items by label and present a merged graph
-  const [sandwichItem, setSandwichItem] = useState<string>();
+  const [internalSandwichItem, setInternalSandwichItem] = useState<string>();
+  // A defined controlled value can legitimately be `undefined` (no
+  // sandwich), so unlike `search` this can't tell controlled from
+  // uncontrolled by nullishness alone — the presence of the change handler
+  // is the signal instead.
+  const sandwichItem = onSandwichChange
+    ? controlledSandwichItem
+    : internalSandwichItem;
+  const setSandwichItem = useCallback(
+    (item: string | undefined) => {
+      onSandwichChange?.(item);
+      if (!onSandwichChange) {
+        setInternalSandwichItem(item);
+      }
+    },
+    [onSandwichChange],
+  );
+  // Reset focus/zoom whenever the *resolved* sandwich value changes, no
+  // matter whether the change came from this pane's own onSandwich click or
+  // arrived via a controlled prop set by the other Comparison pane through
+  // the URL: a controlled sandwich change previously left the old
+  // rangeMin/rangeMax/focusedItemData in place, so the pane rendered a
+  // clipped/zoomed view with a stale focus pill against the new sandwich.
+  // Comparing during render (useEditBuffer's idiom, see AGENTS.md) lands the
+  // reset in the same commit as the sandwich change rather than one render
+  // later. onSandwich below no longer calls resetFocus itself, or a
+  // locally-triggered change would reset twice.
+  const [previousSandwichItem, setPreviousSandwichItem] =
+    useState(sandwichItem);
+  if (previousSandwichItem !== sandwichItem) {
+    setPreviousSandwichItem(sandwichItem);
+    setFocusedItemData(undefined);
+    setRangeMin(0);
+    setRangeMax(1);
+  }
   const [collapsedMap, setCollapsedMap] = useState(new CollapsedMap());
 
   // Use refs to hold the latest callback values to prevent unnecessary re-renders
@@ -171,7 +235,15 @@ const FlameGraphContainer = ({
   useEffect(() => {
     if (!keepFocusOnDataChange) {
       resetFocus();
-      resetSandwich();
+      // A controlled sandwich selection is round-tripped through the URL by
+      // the caller, not a coordinate scoped to this data load — clearing it
+      // here on every refresh would undo a deep link the moment the profile
+      // finished loading. Only the internal, uncontrolled sandwich resets
+      // automatically; a controlled one is cleared by the caller (Reset,
+      // toggling the same item off) same as it is set.
+      if (!onSandwichChange) {
+        resetSandwich();
+      }
       return;
     }
 
@@ -231,10 +303,12 @@ const FlameGraphContainer = ({
   );
   const onSandwich = useCallback(
     (label: string) => {
-      resetFocus();
+      // Focus/zoom resets from the render-time check above (it fires for
+      // any resolved sandwichItem change, this click included) — calling
+      // resetFocus here too would just be a redundant extra reset.
       setSandwichItem(label);
     },
-    [resetFocus, setSandwichItem],
+    [setSandwichItem],
   );
   const onTableSortStable = useCallback((sort: string) => {
     onTableSortRef.current?.(sort);

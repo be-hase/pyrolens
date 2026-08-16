@@ -109,6 +109,32 @@ used by this project's Diff view.
   the menu stuck open. A local `copyText` helper now feature-detects and
   falls back to a hidden-textarea + `document.execCommand('copy')`, and the
   menu always closes after the attempt regardless of outcome.
+- **Controlled search/sandwich.** `FlameGraphContainer.tsx` takes optional
+  `search`/`onSearchChange` and `sandwichItem`/`onSandwichChange` props; when
+  passed, they replace the internal `useState` (the usual controlled/
+  uncontrolled pattern), so the app can lift both into the URL — `fgSearch`
+  and `fgSandwich` are shared across every flame graph on screen (Single,
+  Comparison and Diff alike), which is what makes a copied link (or another
+  pane) point at the same highlighted function. The data-change effect that
+  resets focus and sandwich on every profile refresh now skips the sandwich
+  reset when it is controlled — otherwise a URL-supplied sandwich selection
+  was cleared the moment the profile finished its first load, since that
+  effect already runs once on mount. Separately, `FlameGraphContainer.tsx`
+  resets focus/zoom (`rangeMin`/`rangeMax`/`focusedItemData`) whenever the
+  *resolved* sandwich value changes, comparing during render rather than in
+  the local `onSandwich` handler alone — a sandwich arriving through the
+  controlled prop (set by another pane) used to leave the old focus/zoom in
+  place, rendering a clipped/zoomed canvas against the new sandwich.
+- **Empty sandwich notice.** `FlameGraph/FlameGraph.tsx`: when `sandwichItem`
+  is set but `getSandwichLevels` finds no matching frame — a stale or
+  garbage `fgSandwich` deep link, or a symbol that only exists in the other
+  Comparison pane's profile — upstream falls through to an empty canvas
+  while the metadata pill above still reads "0 | 0 samples", which looks
+  like broken data rather than an absent symbol. This renders a short inline
+  notice in the canvas's place instead. The URL param is deliberately left
+  alone (not auto-cleared): `fgSearch`/`fgSandwich` are shared across every
+  flame graph on screen, so the symbol may legitimately exist in the other
+  pane's data even when it doesn't in this one.
 
 ## Re-syncing with upstream
 
