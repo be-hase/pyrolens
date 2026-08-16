@@ -17,6 +17,7 @@ import {
   fetchLabelValues,
   fetchServices,
   fetchTimeline,
+  parseMaxNodes,
   profileTypeLabel,
   profileTypeUnit,
   setTenant,
@@ -379,6 +380,30 @@ const QUERY = {
   end: 2,
 };
 
+describe('parseMaxNodes', () => {
+  const cases: [string | null, number | undefined][] = [
+    ['500', 500],
+    ['1', 1],
+    ['1000000', 1_000_000],
+    [null, undefined],
+    ['0', undefined],
+    ['-5', undefined],
+    ['1.5', undefined],
+    ['abc', undefined],
+    ['', undefined],
+    ['1000001', undefined],
+    ['1e10', undefined],
+    [' 500', undefined],
+    ['500 ', undefined],
+  ];
+
+  for (const [input, expected] of cases) {
+    it(`${JSON.stringify(input)} -> ${expected}`, () => {
+      assert.equal(parseMaxNodes(input), expected);
+    });
+  }
+});
+
 describe('fetchFlamegraph', () => {
   it('normalizes connect int64 strings to numbers', async () => {
     reply = () =>
@@ -416,6 +441,18 @@ describe('fetchFlamegraph', () => {
       maxSelf: 0,
     });
   });
+
+  it('omits maxNodes from the body when not given', async () => {
+    reply = () => json({});
+    await fetchFlamegraph(QUERY);
+    assert.deepEqual(only().body, QUERY);
+  });
+
+  it('includes maxNodes in the body when given', async () => {
+    reply = () => json({});
+    await fetchFlamegraph(QUERY, 500);
+    assert.deepEqual(only().body, { ...QUERY, maxNodes: 500 });
+  });
 });
 
 describe('fetchDiffFlamegraph', () => {
@@ -443,6 +480,24 @@ describe('fetchDiffFlamegraph', () => {
     assert.deepEqual(await fetchDiffFlamegraph(QUERY, QUERY), {
       names: [],
       levels: [],
+    });
+  });
+
+  it('omits maxNodes from both sides when not given', async () => {
+    reply = () => json({});
+    await fetchDiffFlamegraph(QUERY, { ...QUERY, start: 3 });
+    assert.deepEqual(only().body, {
+      left: QUERY,
+      right: { ...QUERY, start: 3 },
+    });
+  });
+
+  it('places maxNodes inside each side, not the outer envelope', async () => {
+    reply = () => json({});
+    await fetchDiffFlamegraph(QUERY, { ...QUERY, start: 3 }, 500);
+    assert.deepEqual(only().body, {
+      left: { ...QUERY, maxNodes: 500 },
+      right: { ...QUERY, start: 3, maxNodes: 500 },
     });
   });
 });

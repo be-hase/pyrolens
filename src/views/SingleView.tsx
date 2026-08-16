@@ -7,10 +7,10 @@ import { QueryBar } from '@components/QueryBar';
 import { TimeSeries } from '@components/TimeSeries';
 import { useFlamegraph, useTimeline } from '@hooks/useProfileData';
 import { useEditBuffer } from '@hooks/useEditBuffer';
-import { profileTypeLabel } from '@api/client';
+import { parseMaxNodes, profileTypeLabel } from '@api/client';
 import { parseQuery, splitQuery } from '../queryLang';
 import { formatRangeLabel } from '../time';
-import { navigate } from '../urlState';
+import { navigate, useRoute } from '../urlState';
 import { ErrorBanner } from './ComparisonPane';
 import { previousPeriodParams } from './comparisonParams';
 
@@ -34,7 +34,9 @@ export function SingleView({
   range,
   tenantID,
 }: ViewProps) {
-  const fg = useFlamegraph({ query, range, tenantID });
+  const { params } = useRoute();
+  const maxNodes = parseMaxNodes(params.get('maxNodes'));
+  const fg = useFlamegraph({ query, range, tenantID, maxNodes });
   const tl = useTimeline({ query, range, tenantID });
   const error = fg.error ?? tl.error;
   // A single banner can only show one message, but when both hooks failed a

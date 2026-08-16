@@ -216,6 +216,20 @@ export interface ProfileQuery {
 }
 
 /**
+ * Parses the `maxNodes` URL parameter: a positive integer capping the node
+ * count per flamegraph query. The URL is user input, never "corrected" — a
+ * value that isn't a clean positive integer in a sane range (absent, zero,
+ * garbage, or implausibly huge) is treated as absent so the query falls back
+ * to the server's own default rather than the client silently picking a
+ * different number.
+ */
+export function parseMaxNodes(value: string | null): number | undefined {
+  if (value === null || !/^\d+$/.test(value)) return undefined;
+  const n = Number(value);
+  return n >= 1 && n <= 1_000_000 ? n : undefined;
+}
+
+/**
  * Single flamegraph in Pyroscope flamebearer format: `levels[i]` is a flat
  * number array in groups of 4 — offset (relative to the previous sibling's
  * end), total, self, name index into `names`.
@@ -229,11 +243,15 @@ export interface FlamegraphData {
 
 export async function fetchFlamegraph(
   params: ProfileQuery,
+  maxNodes?: number,
   signal?: AbortSignal,
 ): Promise<FlamegraphData> {
   const res = await rpc<{ flamegraph?: WireFlamegraph }>(
     'SelectMergeStacktraces',
-    params,
+    // JSON.stringify drops an undefined-valued property, so an absent
+    // maxNodes is simply not sent rather than sent as null/0 — the server
+    // then applies its own default instead of reading a manufactured value.
+    { ...params, maxNodes },
     signal,
   );
   const fg = res.flamegraph;
@@ -259,11 +277,17 @@ export interface DiffFlamegraphData {
 export async function fetchDiffFlamegraph(
   left: ProfileQuery,
   right: ProfileQuery,
+  maxNodes?: number,
   signal?: AbortSignal,
 ): Promise<DiffFlamegraphData> {
   const res = await rpc<{ flamegraph?: WireFlamegraph }>(
     'Diff',
-    { left, right },
+    // Diff nests two SelectMergeStacktraces-shaped requests (see the
+    // "double" flamebearer comment on DiffFlamegraphData below) rather than
+    // exposing one merged query, and the querier reads maxNodes per side —
+    // there is no top-level field for it — so it goes on `left` and `right`
+    // individually, not on the outer { left, right } envelope.
+    { left: { ...left, maxNodes }, right: { ...right, maxNodes } },
     signal,
   );
   return {

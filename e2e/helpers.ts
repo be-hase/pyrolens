@@ -70,6 +70,11 @@ export interface UpstreamCall {
   step: number | null;
   name: string | null;
   limit: number | null;
+  /** Top-level maxNodes, as SelectMergeStacktraces carries it. */
+  maxNodes: number | null;
+  /** Diff's per-side maxNodes — see fake-pyroscope.mjs's wire-shape note. */
+  leftMaxNodes: number | null;
+  rightMaxNodes: number | null;
 }
 
 /** What the fake upstream has been asked for, through the Go proxy. */

@@ -3,8 +3,9 @@ import { ControlsBar } from '@components/ControlsBar';
 import { FlameGraph } from '@components/FlameGraph';
 import { Button } from '@components/core/Button';
 import { useFlamegraph } from '@hooks/useProfileData';
+import { parseMaxNodes } from '@api/client';
 import { splitQuery } from '../queryLang';
-import { navigate } from '../urlState';
+import { navigate, useRoute } from '../urlState';
 import { ComparisonPane, ErrorBanner } from './ComparisonPane';
 import {
   swappedPaneParams,
@@ -28,6 +29,7 @@ function PaneFlamegraph({
   tenantID,
   from,
   until,
+  maxNodes,
 }: {
   pane: PaneParams;
   tenantID?: string;
@@ -35,11 +37,14 @@ function PaneFlamegraph({
    * hours" widens the range everything is brushed against. */
   from: string;
   until: string;
+  /** Caps the node count per pane's query; server default when unset. */
+  maxNodes?: number;
 }) {
   const { flamegraph, loading, error, retry } = useFlamegraph({
     query: pane.query,
     range: pane.range,
     tenantID,
+    maxNodes,
   });
   const { profileTypeID } = splitQuery(pane.query);
   return (
@@ -97,6 +102,8 @@ export function ComparisonView({
   tenantID,
 }: ViewProps) {
   const { left, right } = useComparisonParams(query, range);
+  const { params } = useRoute();
+  const maxNodes = parseMaxNodes(params.get('maxNodes'));
 
   return (
     <div className="app-content">
@@ -136,6 +143,7 @@ export function ComparisonView({
             tenantID={tenantID}
             from={from}
             until={until}
+            maxNodes={maxNodes}
           />
         </ComparisonPane>
         <ComparisonPane
@@ -150,6 +158,7 @@ export function ComparisonView({
             tenantID={tenantID}
             from={from}
             until={until}
+            maxNodes={maxNodes}
           />
         </ComparisonPane>
       </div>
