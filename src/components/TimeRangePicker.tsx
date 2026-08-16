@@ -547,13 +547,18 @@ export function TimeRangePicker({
     [],
   );
 
-  // Four bindings, all sharing one keydown listener: `y` (GitHub's
-  // canonical-URL mnemonic) switches the range to absolute; Grafana's `t`
-  // sequences are kept as aliases for muscle memory carried over from there —
-  // `t a` also switches to absolute, `t c` copies the range to the clipboard
-  // in Grafana's own JSON format, `t v` pastes it back. Re-registers whenever
-  // `range`, `from` or `until` change so the handler always closes over what
-  // is currently on screen rather than a snapshot from whenever the listener
+  // Bindings, all sharing one keydown listener: `y` (GitHub's canonical-URL
+  // mnemonic) switches the range to absolute; Grafana's `t` sequences are
+  // kept as aliases for muscle memory carried over from there — `t a` also
+  // switches to absolute, `t c` copies the range to the clipboard in
+  // Grafana's own JSON format, `t v` pastes it back, `t z` zooms out 2×
+  // around the center, and `t ArrowLeft`/`t ArrowRight` shift the window
+  // back/forward by half its span. Zoom and shift write absolute bounds too,
+  // the same contract as `t a`: Grafana's own zoom/shift always resolves to
+  // an absolute range rather than leaving a relative one that keeps
+  // drifting underneath the view it produced. Re-registers whenever `range`,
+  // `from` or `until` change so the handler always closes over what is
+  // currently on screen rather than a snapshot from whenever the listener
   // was first attached; pressing a binding while already on the range it
   // would produce writes a byte-identical URL, which navigate() already
   // turns into a no-op replaceState (see src/urlState.ts) rather than a new
@@ -698,28 +703,95 @@ export function TimeRangePicker({
           });
       };
 
+      // `t z`: zoom out 2x around the center — span doubles, midpoint stays
+      // put. Rounded to integers because span/2 need not be, and the URL
+      // bounds are read back as ms.
+      const zoomOut = () => {
+        const span = range.end - range.start;
+        const half = span / 2;
+        navigate({
+          set: {
+            from: String(Math.round(range.start - half)),
+            until: String(Math.round(range.end + half)),
+          },
+        });
+      };
+
+      // `t ArrowLeft`: shift the window back by half its span, keeping the
+      // span itself unchanged.
+      const shiftBack = () => {
+        const span = range.end - range.start;
+        const half = span / 2;
+        navigate({
+          set: {
+            from: String(Math.round(range.start - half)),
+            until: String(Math.round(range.end - half)),
+          },
+        });
+      };
+
+      // `t ArrowRight`: the mirror of shiftBack, but clamped to the wall
+      // clock — Date.now() here, not a cached value, because this only runs
+      // from a live keydown (see the no-Date.now-in-render rule this file's
+      // neighbours follow for "now" elsewhere). A window already at or past
+      // "now" has nowhere to shift forward into, so it is a no-op rather
+      // than silently shrinking the span by clamping only one side of it.
+      const shiftForward = () => {
+        // `range.end` is a render-time snapshot of "now" for a relative
+        // until — by the time this handler runs, the real Date.now() below
+        // has already advanced past it, so `range.end >= now` reads false
+        // and the code below would "shift" a still-relative, already-at-now
+        // range into an absolute one a few milliseconds wide. Checking the
+        // committed URL value first (not range.end) catches that case before
+        // the clock ever enters into it.
+        if (!until || until === 'now') return;
+        const now = Date.now();
+        if (range.end >= now) return;
+        const span = range.end - range.start;
+        const half = span / 2;
+        let newEnd = range.end + half;
+        let newStart = range.start + half;
+        if (newEnd > now) {
+          newEnd = now;
+          newStart = now - span;
+        }
+        navigate({
+          set: {
+            from: String(Math.round(newStart)),
+            until: String(Math.round(newEnd)),
+          },
+        });
+      };
+
+      // Looked up by key once a `t` sequence is armed — a map instead of a
+      // growing if/else chain now that there are seven letters/keys to
+      // dispatch on.
+      const sequenceActions: Record<string, () => void> = {
+        a: absolute,
+        y: absolute,
+        c: copyRange,
+        v: pasteRange,
+        z: zoomOut,
+        ArrowLeft: shiftBack,
+        ArrowRight: shiftForward,
+      };
+
       if (tPending.current) {
         // An unguarded `t` restarts the window instead of acting or
         // cancelling — holding the key (key-repeat) or retyping it should
-        // still lead into `t a`/`t c`/`t v`, not swallow the sequence.
+        // still lead into `t a`/`t c`/`t v`/`t z`/`t ArrowLeft`/
+        // `t ArrowRight`, not swallow the sequence.
         if (e.key === 't' && !guarded()) {
           rearm();
           return;
         }
         // Any other key disarms the sequence, guarded or not; only an
-        // unguarded `a`/`y` (switch to absolute), `c` (copy) or `v` (paste)
-        // also acts.
+        // unguarded key present in sequenceActions also acts.
         const eligible = !guarded();
         const key = e.key;
         disarm();
         if (!eligible) return;
-        if (key === 'a' || key === 'y') {
-          absolute();
-        } else if (key === 'c') {
-          copyRange();
-        } else if (key === 'v') {
-          pasteRange();
-        }
+        sequenceActions[key]?.();
         return;
       }
 

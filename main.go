@@ -5,6 +5,8 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"embed"
 	"errors"
@@ -12,11 +14,13 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"mime"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -86,6 +90,112 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+// compressibleExt is the set of embedded-asset extensions gzip meaningfully
+// shrinks. The bundle is the point (~310 KB down to ~99 KB); the rest ride
+// along for free since compressing them costs one startup-time pass either
+// way. Images already in a compressed format are deliberately left out —
+// gzipping them again only spends CPU to grow them.
+var compressibleExt = map[string]bool{
+	".js":   true,
+	".css":  true,
+	".html": true,
+	".svg":  true,
+	".json": true,
+	".txt":  true,
+}
+
+// extOf returns a fs.FS path's extension including the dot. fs.FS paths are
+// always "/"-separated regardless of host OS, so this is used instead of
+// path/filepath, whose Ext is platform-specific on Windows.
+func extOf(p string) string {
+	if i := strings.LastIndex(p, "."); i >= 0 {
+		return p[i:]
+	}
+	return ""
+}
+
+// contentTypeFor mirrors what http.ServeContent derives for the identity
+// response (both go through mime.TypeByExtension), so a client sees the same
+// Content-Type whichever encoding it ends up with.
+func contentTypeFor(p string) string {
+	if ct := mime.TypeByExtension(extOf(p)); ct != "" {
+		return ct
+	}
+	return "application/octet-stream"
+}
+
+// serveGzip answers with a precompressed variant through the same
+// http.ServeContent machinery the identity path goes through (http.FileServer
+// calls it internally), so a gzip response gets the same semantics as the
+// file it was derived from: Range applies to the gzip bytes (correct per RFC
+// 9110 — a range request addresses the selected representation, and the
+// encoding is part of that), If-None-Match is honored, and HEAD suppresses
+// the body instead of a manual w.Write reporting phantom bytes to the access
+// log. The caller sets Content-Type before calling this, since ServeContent
+// only sniffs when the header is still unset, and passes an empty name and a
+// zero modtime so no validator is added — matching the identity path, which
+// serves out of an embed.FS with no modtime of its own.
+func serveGzip(w http.ResponseWriter, r *http.Request, gz []byte) {
+	w.Header().Set("Content-Encoding", "gzip")
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(gz))
+}
+
+// gzipAssets walks dist once at startup and precompresses every compressible
+// file, so the request path never spends CPU compressing — only on choosing
+// which bytes to write. A file gzip does not shrink (too small, or an
+// extension that slipped into compressibleExt while already holding
+// compressed bytes) is left out of the map, and the identity path serves it
+// instead.
+func gzipAssets(dist fs.FS) map[string][]byte {
+	assets := make(map[string][]byte)
+	fs.WalkDir(dist, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !compressibleExt[extOf(p)] {
+			return nil
+		}
+		data, err := fs.ReadFile(dist, p)
+		if err != nil {
+			return nil
+		}
+		var buf bytes.Buffer
+		gw, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+		if err != nil {
+			return nil
+		}
+		gw.Write(data)
+		gw.Close()
+		if buf.Len() < len(data) {
+			assets[p] = buf.Bytes()
+		}
+		return nil
+	})
+	return assets
+}
+
+// acceptsGzip reports whether the request's Accept-Encoding lists gzip. A
+// token match on the comma-separated list is enough for the one alternative
+// encoding this server offers, done case-insensitively since the token is
+// case-insensitive per RFC 9110. The qvalue is parsed as a float rather than
+// string-compared against "0", since "0.0" and "0.000" are equally legal
+// spellings of "never" that a literal match on "0" would miss and treat as
+// accept — sending a browser bytes it declared it cannot handle. A qvalue
+// that fails to parse is treated as accept, matching the tolerant reading of
+// the rest of this function.
+func acceptsGzip(r *http.Request) bool {
+	for _, part := range strings.Split(r.Header.Get("Accept-Encoding"), ",") {
+		name, params, _ := strings.Cut(strings.TrimSpace(part), ";")
+		if !strings.EqualFold(strings.TrimSpace(name), "gzip") {
+			continue
+		}
+		if q, ok := strings.CutPrefix(strings.TrimSpace(params), "q="); ok {
+			if qv, err := strconv.ParseFloat(q, 64); err == nil && qv <= 0 {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
+
 // newProxy builds the reverse proxy to the Pyroscope server.
 func newProxy(target *url.URL) *httputil.ReverseProxy {
 	proxy := httputil.NewSingleHostReverseProxy(target)
@@ -114,8 +224,10 @@ func newProxy(target *url.URL) *httputil.ReverseProxy {
 }
 
 // newHandler routes the query API to Pyroscope and everything else to the
-// embedded UI, whose shell is `index`.
-func newHandler(dist fs.FS, index []byte, proxy http.Handler) http.Handler {
+// embedded UI, whose shell is `index`. gzipped holds the precompressed
+// variants keyed by their dist-relative path (gzipAssets), index.html's
+// entry included, so the shell and the on-disk files share one lookup.
+func newHandler(dist fs.FS, index []byte, gzipped map[string][]byte, proxy http.Handler) http.Handler {
 	fileServer := http.FileServer(http.FS(dist))
 
 	mux := http.NewServeMux()
@@ -151,6 +263,25 @@ func newHandler(dist fs.FS, index []byte, proxy http.Handler) http.Handler {
 				if strings.HasPrefix(path, "assets/") {
 					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 				}
+				// index.html is excluded here even though gzipped holds an
+				// entry for it: a direct request for it must fall through to
+				// fileServer below for FileServer's canonical redirect to
+				// "./", the same as the identity path. Answering it here
+				// instead skipped that redirect and served 200 with no
+				// Cache-Control at all, so an intermediary could cache a
+				// stale shell past a redeploy.
+				if gz, ok := gzipped[path]; ok && path != "index.html" {
+					// A cache sitting in front of this (a CDN, a corporate
+					// proxy) must key on the request header once identity and
+					// gzip bytes can both come back for the same path, or it
+					// risks handing a client the wrong one.
+					w.Header().Set("Vary", "Accept-Encoding")
+					if acceptsGzip(r) {
+						w.Header().Set("Content-Type", contentTypeFor(path))
+						serveGzip(w, r, gz)
+						return
+					}
+				}
 				fileServer.ServeHTTP(w, r)
 				return
 			}
@@ -167,14 +298,115 @@ func newHandler(dist fs.FS, index []byte, proxy http.Handler) http.Handler {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
+		if gz, ok := gzipped["index.html"]; ok {
+			w.Header().Set("Vary", "Accept-Encoding")
+			if acceptsGzip(r) {
+				// Content-Type is already set above, so serveGzip's
+				// ServeContent call won't try to sniff it.
+				serveGzip(w, r, gz)
+				return
+			}
+		}
 		w.Write(index)
 	})
 	return withSecurityHeaders(mux)
 }
 
+// parseBoolEnv parses a boolean env var's raw value. An empty value means
+// "unset" and is reported as ok — the flag's own default applies — but a
+// non-empty value strconv.ParseBool rejects is reported back as !ok, so the
+// caller can fail loudly instead of an operator's typo silently landing on
+// false. Split out from boolEnvOr so this parsing logic is testable without
+// the log.Fatalf a real misconfiguration deserves.
+func parseBoolEnv(value string) (v bool, ok bool) {
+	if value == "" {
+		return false, true
+	}
+	v, err := strconv.ParseBool(value)
+	return v, err == nil
+}
+
+// boolEnvOr parses an env var as a flag default the way envOr does for
+// strings. An unset variable is false, matching -log-requests' own default;
+// a set one that is not a recognized boolean is a startup-time misconfig, not
+// a silent no-op — LOG_REQUESTS=yes turning logging off with no diagnostic is
+// the failure this guards against.
+func boolEnvOr(key string) bool {
+	v, ok := parseBoolEnv(os.Getenv(key))
+	if !ok {
+		log.Fatalf("%s=%q is not a valid boolean (accepted: 1, t, T, TRUE, true, True, 0, f, F, FALSE, false, False)", key, os.Getenv(key))
+	}
+	return v
+}
+
+// statusWriter captures what a handler actually sent, since
+// http.ResponseWriter does not hand that back to a wrapper around it.
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+	bytes  int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusWriter) Write(b []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK // a handler that never calls WriteHeader sent a 200
+	}
+	n, err := w.ResponseWriter.Write(b)
+	w.bytes += n
+	return n, err
+}
+
+// Unwrap lets http.ResponseController reach the wrapped ResponseWriter's
+// optional interfaces (Flush, Hijack, ...) straight through this one.
+// httputil.ReverseProxy flushes a chunked upstream response per write via
+// exactly that mechanism, so without Unwrap it silently gets
+// http.ErrNotSupported and -log-requests turns per-write flushing off.
+func (w *statusWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+// withAccessLog logs one line per request: method, path, status, duration
+// and response size, which is enough to answer "why is the UI slow" or
+// "which tenant is hammering Pyroscope" without it being on by default. The
+// query string is never logged even though the URL is the whole app's state
+// — that state is exactly the tenant's label matchers and time range, and
+// this server sees more than one tenant, so printing it would put one
+// tenant's query values in a log another operator might read. The path
+// alone carries no query data.
+func withAccessLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sw := &statusWriter{ResponseWriter: w}
+		next.ServeHTTP(sw, r)
+		status := sw.status
+		if status == 0 {
+			status = http.StatusOK // nothing was ever written either
+		}
+		// EscapedPath, not Path: Path is percent-decoded, so a path like
+		// "/x%0aFAKE%20LINE" would put a literal newline into the log and
+		// forge a second line. The server is unauthenticated, so anyone who
+		// can reach it can reach this log line.
+		line := fmt.Sprintf("%s %s %d %s %dB", r.Method, r.URL.EscapedPath(), status, time.Since(start), sw.bytes)
+		if strings.HasPrefix(r.URL.Path, querierPrefix) {
+			tenant := r.Header.Get("X-Scope-OrgID")
+			if tenant == "" {
+				tenant = "-"
+			}
+			line += " tenant=" + tenant
+		}
+		log.Print(line)
+	})
+}
+
 func main() {
 	listen := flag.String("listen", envOr("LISTEN", ":4041"), "address to listen on (env: LISTEN)")
 	pyroscopeURL := flag.String("pyroscope-url", envOr("PYROSCOPE_URL", "http://localhost:4040"), "Pyroscope server base URL (env: PYROSCOPE_URL)")
+	logRequests := flag.Bool("log-requests", boolEnvOr("LOG_REQUESTS"), "log one line per request: method, path, status, duration, bytes (env: LOG_REQUESTS)")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
@@ -196,10 +428,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("embedded UI missing (build it with `yarn build` before `go build`): %v", err)
 	}
+	// Precompressed once here rather than per-request: the bundle is the
+	// same bytes on every request this process serves, so there is nothing
+	// to gain from redoing the work later.
+	gzipped := gzipAssets(dist)
 
+	handler := newHandler(dist, index, gzipped, newProxy(target))
+	if *logRequests {
+		handler = withAccessLog(handler)
+	}
 	server := &http.Server{
 		Addr:              *listen,
-		Handler:           newHandler(dist, index, newProxy(target)),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       time.Minute,
 		WriteTimeout:      5 * time.Minute,

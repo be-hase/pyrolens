@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import { formatCell, groupByLabels, summarize } from './tagExplorerData.ts';
+import type { TagRow } from './tagExplorerData.ts';
+import {
+  formatCell,
+  groupByLabels,
+  sortRows,
+  summarize,
+} from './tagExplorerData.ts';
 
 const series = (label: string, values: number[]) => ({
   label,
@@ -118,6 +124,58 @@ describe('summarize', () => {
         ['(none)', '(none)'],
         ['(none)', null],
       ],
+    );
+  });
+});
+
+describe('sortRows', () => {
+  // Deliberately in none of the three orders (sum, avg or max) each column
+  // would produce, so a test passing by accident — because one order
+  // happened to match the input — is not possible. In particular, `null`
+  // must leave input order alone: the old fixture here happened to already
+  // be sum-descending, so a null branch that (wrongly) re-sorted by sum
+  // instead of passing the array through untouched would still have passed.
+  const rows: TagRow[] = [
+    { label: 'a', value: 'a', sum: 10, avg: 5, max: 8, share: 17 },
+    { label: 'b', value: 'b', sum: 30, avg: 9, max: 12, share: 50 },
+    { label: 'c', value: 'c', sum: 20, avg: 20, max: 5, share: 33 },
+  ];
+
+  it('sorts descending by avg', () => {
+    assert.deepEqual(
+      sortRows(rows, 'avg').map((r) => r.label),
+      ['c', 'b', 'a'],
+    );
+  });
+
+  it('sorts descending by max', () => {
+    assert.deepEqual(
+      sortRows(rows, 'max').map((r) => r.label),
+      ['b', 'a', 'c'],
+    );
+  });
+
+  it('null preserves input order', () => {
+    assert.deepEqual(sortRows(rows, null), rows);
+  });
+
+  it('keeps tied rows in their input order', () => {
+    const tied: TagRow[] = [
+      { label: 'x', value: 'x', sum: 5, avg: 5, max: 5, share: 50 },
+      { label: 'y', value: 'y', sum: 5, avg: 5, max: 5, share: 50 },
+    ];
+    assert.deepEqual(
+      sortRows(tied, 'avg').map((r) => r.label),
+      ['x', 'y'],
+    );
+  });
+
+  it('does not mutate its input', () => {
+    const before = rows.map((r) => r.label);
+    sortRows(rows, 'avg');
+    assert.deepEqual(
+      rows.map((r) => r.label),
+      before,
     );
   });
 });

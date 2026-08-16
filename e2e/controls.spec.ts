@@ -182,6 +182,24 @@ test('the `t a` sequence switches the range to absolute, mirroring `y`', async (
   await expect(trigger).not.toHaveText(/Last/);
 });
 
+test('the `t z` sequence zooms out 2x, centered on the current range', async ({
+  page,
+}) => {
+  const from = new Date(2026, 0, 2, 9, 0, 0).getTime();
+  const until = new Date(2026, 0, 2, 11, 0, 0).getTime();
+  await page.goto(url('/', { from, until }));
+  await expect(page.locator('.plfg-metadata-pill').first()).toBeVisible();
+
+  const params = () => new URL(page.url()).searchParams;
+
+  await page.keyboard.press('t');
+  await page.keyboard.press('z');
+
+  const half = (until - from) / 2;
+  await expect.poll(() => params().get('from')).toBe(String(from - half));
+  expect(params().get('until')).toBe(String(until + half));
+});
+
 test('`t c` copies the range as Grafana JSON — relative as-is, absolute as ISO-8601 — and `t v` pastes it back', async ({
   page,
   context,

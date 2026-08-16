@@ -54,6 +54,20 @@ export function summarize(
     .sort((a, b) => b.sum - a.sum);
 }
 
+/** The table's sort column; `null` is the default sum/share ranking. */
+export type SortKey = 'avg' | 'max' | null;
+
+/**
+ * Table rows sorted descending by one column, or left in `summarize`'s
+ * sum-ranked order when `key` is null. `Array#sort` is stable, so a tie
+ * keeps the rows in whatever order they arrived rather than reshuffling on
+ * every render.
+ */
+export function sortRows(rows: TagRow[], key: SortKey): TagRow[] {
+  if (key === null) return rows;
+  return [...rows].sort((a, b) => b[key] - a[key]);
+}
+
 /** The labels offered as a grouping, in display form. */
 export function groupByLabels(names: string[]): string[] {
   // profile_type and service_name are already pinned by the query itself, so

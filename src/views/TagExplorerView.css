@@ -57,6 +57,23 @@
   border-bottom: 1px solid var(--border-weak);
 }
 
+.tag-explorer-sort-th {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.tag-explorer-sort-th:hover {
+  color: var(--text-primary);
+}
+
+.tag-explorer-table th[aria-sort='descending'] .tag-explorer-sort-th {
+  color: var(--color-primary-text);
+}
+
 .tag-explorer-chip-cell {
   width: 20px;
 }
@@ -106,5 +123,21 @@
 
 .tag-explorer-actions button:hover {
   color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.tag-explorer-show-all {
+  display: block;
+  margin: var(--space-2) auto 0;
+  padding: 4px var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-primary-text);
+  background: transparent;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.tag-explorer-show-all:hover {
   border-color: var(--border-strong);
 }

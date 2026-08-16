@@ -72,6 +72,7 @@ Flags / env of the server binary:
 | ---------------- | --------------- | ----------------------- | ----------------------- |
 | `-listen`        | `LISTEN`        | `:4041`                 | address to listen on    |
 | `-pyroscope-url` | `PYROSCOPE_URL` | `http://localhost:4040` | Pyroscope server to use |
+| `-log-requests`  | `LOG_REQUESTS`  | `false`                 | log one line per request (method, path, status, duration, bytes, and the tenant header for querier calls) |
 | `-version`       | —               | —                       | print the version and exit |
 
 The server embeds the built SPA and reverse-proxies
@@ -80,6 +81,9 @@ to a single origin and your Pyroscope server never needs CORS or direct
 exposure. That one prefix is the whole query API the UI uses; nothing else is
 forwarded, so Pyroscope's ingest and admin endpoints are not reachable
 through pyrolens.
+
+The embedded assets are served gzip-compressed whenever the browser accepts
+it — no flag needed, it's automatic.
 
 ### Security
 
@@ -107,17 +111,23 @@ All state is carried in query parameters; every view is shareable.
 | `from` / `until`                                   | main time range — `now-1h`-style relative or unix-ms absolute        |
 | `leftQuery` / `leftFrom` / `leftUntil` (+ `right…`) | Comparison & Diff pane selections; default to `query` / range halves |
 | `groupBy`                                          | Tag Explorer grouping label                                          |
+| `sort`                                             | Tag Explorer breakdown table sort: `avg` or `max` (default: Share/sum) |
 
 Views: `/` (Single), `/comparison`, `/diff`, `/explore` (Tag Explorer).
 
 Keyboard shortcuts: `y` or `t a` switches the time range to absolute so the
 URL can be shared as-is; `t c` copies it (Grafana's own clipboard format, so
-it pastes in either tool) and `t v` pastes it back. `t v` needs a secure
-context (HTTPS or localhost) to read the clipboard; `t c` has a legacy
-fallback for an insecure one, the same one `copy absolute link` uses, which
-can still fail depending on the browser. Grafana's rounded relative ranges
-(`now/d` and the like) are not supported in either direction: pyrolens URLs
-cannot express them, so pasting one reports "Paste failed".
+it pastes in either tool) and `t v` pastes it back. `t z` zooms out 2× around
+the center of the current range; `t ArrowLeft`/`t ArrowRight` shift the
+window back/forward by half its span. Like `t a`, `t z` and the arrow
+shortcuts always write an absolute range, even starting from a relative one.
+`t ArrowRight` clamps to the current time — it will not shift past "now", and
+does nothing once the window already reaches it. `t v` needs a secure context
+(HTTPS or localhost) to read the clipboard; `t c` has a legacy fallback for an
+insecure one, the same one `copy absolute link` uses, which can still fail
+depending on the browser. Grafana's rounded relative ranges (`now/d` and the
+like) are not supported in either direction: pyrolens URLs cannot express
+them, so pasting one reports "Paste failed".
 
 ## Development
 
