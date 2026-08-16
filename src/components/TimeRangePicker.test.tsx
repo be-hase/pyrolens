@@ -1063,6 +1063,56 @@ describe('TimeRangePicker', () => {
       );
     });
 
+    it('a `t v` still navigates after a replace-navigation that changes only fgSearch', async () => {
+      // The flame graph search's own 400ms debounce lands as a
+      // replace-navigation while readText() can still be in flight — it
+      // writes fgSearch only, so the pathname and the from/until params this
+      // paste is about to overwrite never moved. Old code compared the
+      // WHOLE pathname+search at dispatch against settlement, so this
+      // fgSearch-only change looked exactly like the real-navigation case
+      // above and silently discarded the paste, with no feedback.
+      at('/?from=now-1h');
+      const read = deferred<string>();
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { readText: () => read.promise },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      // Simulates the fgSearch debounce's own replace-navigation landing
+      // before this paste's clipboard read has settled.
+      at('/?from=now-1h&fgSearch=alloc');
+
+      await act(async () => {
+        read.settle(
+          JSON.stringify({
+            from: '2026-01-02 09:05:00',
+            to: '2026-01-02 17:30:00',
+          }),
+        );
+        await read.promise;
+      });
+
+      assert.equal(
+        params().get('from'),
+        String(new Date(2026, 0, 2, 9, 5, 0).getTime()),
+      );
+      assert.equal(
+        params().get('until'),
+        String(new Date(2026, 0, 2, 17, 30, 0).getTime()),
+      );
+    });
+
     it('`t`, then an auto-refresh tick, then `c` still copies the range', async () => {
       // Old code re-registered the keydown effect on every `range` change,
       // and its cleanup unconditionally disarmed the pending `t` — a tick

@@ -42,10 +42,16 @@ func handleRequest(phase int) {
 	}
 }
 
-func regionLoop(region string, weight int, start time.Time) {
+func regionLoop(region string, weight int) {
 	pyroscope.TagWrapper(context.Background(), pyroscope.Labels("region", region), func(ctx context.Context) {
 		for {
-			phase := int(time.Since(start).Minutes()) % 2
+			// Wall-clock minute, not elapsed-since-start: e2e/capture.mjs and
+			// dev/README.md assume the slowRegression frame alternates on the
+			// clock's own minute boundary. Keying it off `start` instead phase-
+			// shifts with however far into a minute the process happened to
+			// launch, so a container started mid-minute yields ~50/50 mixed
+			// capture windows and a near-empty Diff fixture.
+			phase := int(time.Now().Unix()/60) % 2
 			for i := 0; i < weight; i++ {
 				handleRequest(phase)
 			}
@@ -73,8 +79,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	start := time.Now()
-	go regionLoop("us-east", 3, start)
-	go regionLoop("eu-west", 2, start)
-	regionLoop("ap-south", 1, start)
+	go regionLoop("us-east", 3)
+	go regionLoop("eu-west", 2)
+	regionLoop("ap-south", 1)
 }

@@ -33,17 +33,21 @@ const fixtures = {
   Diff: read('Diff.json'),
 };
 const noTenant = read('no-tenant.txt');
-const { service } = JSON.parse(read('meta.json'));
+const { service, noTenantStatus } = JSON.parse(read('meta.json'));
 
 // What the suite asserts against when it needs to know a request really
 // carried something — the tenant header, say, through the Go proxy.
 const log = [];
 
 const body = (req) =>
-  new Promise((resolve) => {
+  new Promise((resolve, reject) => {
     let text = '';
     req.on('data', (chunk) => (text += chunk));
     req.on('end', () => resolve(text));
+    // Without this, a connection reset mid-body leaves the promise pending
+    // forever rather than rejecting — the request that caused it hangs, and
+    // nothing else in the process is affected, but it should fail fast.
+    req.on('error', reject);
   });
 
 const server = createServer(async (req, res) => {
@@ -67,7 +71,16 @@ const server = createServer(async (req, res) => {
 
   const method = req.url.slice(PREFIX.length);
   const tenant = req.headers['x-scope-orgid'];
-  const request = JSON.parse((await body(req)) || '{}');
+  let request;
+  try {
+    request = JSON.parse((await body(req)) || '{}');
+  } catch {
+    // A malformed body used to throw here uncaught: createServer's handler
+    // is async, so that became an unhandled rejection that killed the whole
+    // process (and every test still running against it) instead of failing
+    // just the one request.
+    return json(400, JSON.stringify({ code: 'invalid_argument' }));
+  }
   // Enough of the request for a spec to assert what was actually asked for.
   // With only the method and the tenant here, a regression that queried the
   // wrong profile type or the wrong window still replayed the same fixture
@@ -93,8 +106,10 @@ const server = createServer(async (req, res) => {
   });
 
   // The tenancy probe: an empty org id is what the UI sends to find out
-  // whether this server wants one.
-  if (tenant === '' && MULTITENANT) return json(401, noTenant);
+  // whether this server wants one. The status replayed is whatever the real
+  // server gave at capture time (meta.json), not a hardcoded 401 — the two
+  // have drifted from each other before.
+  if (tenant === '' && MULTITENANT) return json(noTenantStatus, noTenant);
 
   // A selector naming some other service gets the empty answer the server
   // really gives, so the UI's "no data" state is reachable on purpose rather

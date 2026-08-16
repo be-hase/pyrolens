@@ -93,3 +93,20 @@ describe('SingleView retry wiring', () => {
     assert.equal(flamegraphOf.mock.calls.length, 0);
   });
 });
+
+describe('SingleView empty flamegraph messaging', () => {
+  it('does not claim a query matched nothing when no query was selected', async () => {
+    // query='' is deliberately preserved (see App.tsx) rather than defaulted
+    // away, and splitQuery('').profileTypeID is falsy, so useFlamegraph
+    // never sends a fetch (active=false in useProfileData.ts). Asserting
+    // "no profiles matched this query" — plus a "Last 24 hours" action that
+    // cannot help — would claim a result for a query never sent.
+    render(<SingleView {...PROPS} query="" />);
+
+    await waitFor(() => assert.equal(flamegraphOf.mock.calls.length, 0));
+    assert.ok(
+      !screen.queryByText(/No profiles matched this query in this range/),
+    );
+    assert.ok(!screen.queryByRole('button', { name: 'Last 24 hours' }));
+  });
+});

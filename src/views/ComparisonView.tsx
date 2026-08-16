@@ -60,30 +60,37 @@ function PaneFlamegraph({
         empty={
           error
             ? undefined
-            : {
-                message: FLAMEGRAPH_EMPTY_MESSAGE,
-                action: isLast24h(from, until)
-                  ? undefined
-                  : {
-                      label: 'Last 24 hours',
-                      onClick: () =>
-                        navigate({
-                          set: {
-                            from: 'now-24h',
-                            until: null,
-                            // Widening the main range must also clear the
-                            // pane sub-ranges, or a pane stays pinned to its
-                            // previously brushed range and the widening has
-                            // no visible effect — the same clear the Tag
-                            // Explorer's compareRow does when it lands here.
-                            leftFrom: null,
-                            leftUntil: null,
-                            rightFrom: null,
-                            rightUntil: null,
-                          },
-                        }),
-                    },
-              }
+            : !profileTypeID
+              ? // No usable query on this pane means no fetch was ever sent
+                // (see SingleView's identical gate) — asserting "no profiles
+                // matched" and offering "Last 24 hours" would misstate a
+                // query that never ran.
+                { message: 'No query selected.' }
+              : {
+                  message: FLAMEGRAPH_EMPTY_MESSAGE,
+                  action: isLast24h(from, until)
+                    ? undefined
+                    : {
+                        label: 'Last 24 hours',
+                        onClick: () =>
+                          navigate({
+                            set: {
+                              from: 'now-24h',
+                              until: null,
+                              // Widening the main range must also clear the
+                              // pane sub-ranges, or a pane stays pinned to
+                              // its previously brushed range and the
+                              // widening has no visible effect — the same
+                              // clear the Tag Explorer's compareRow does
+                              // when it lands here.
+                              leftFrom: null,
+                              leftUntil: null,
+                              rightFrom: null,
+                              rightUntil: null,
+                            },
+                          }),
+                      },
+                }
         }
       />
     </>

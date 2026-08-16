@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { Select } from '@components/core/Select';
 import { fetchesInFlight } from '@api/client';
-import { isRelative } from '../time';
 import { navigate, useRoute } from '../urlState';
 
 // The interval presets, in the order the dropdown lists them. `value` is
@@ -45,13 +44,24 @@ export function RefreshPicker({
   from: string;
   until: string;
 }) {
+  // Accepted (and kept in the type) for symmetry with TimeRangePicker, which
+  // ControlsBar passes the same from/until pair to — but eligibility below
+  // depends only on `until`, so `from` itself is unread; see the comment on
+  // `relativeActive`.
+  void from;
+
   const { params } = useRoute();
   const refreshParam = params.get('refresh');
   const interval = parseRefresh(refreshParam);
 
-  // Same predicate TimeRangePicker uses to decide whether "now" is moving:
-  // an absolute range has nothing for a tick to advance.
-  const relativeActive = isRelative(from) && (until === 'now' || !until);
+  // Eligibility is about whether the END moves, not the start: a tick
+  // advances "now", and a moving end is exactly what that means for the
+  // range on screen. A pinned start (e.g. clipboard interop deliberately
+  // produces `from=<absolute ms>&until=now` — a fixed start, a moving end)
+  // is irrelevant to that question, so this must not also require
+  // `isRelative(from)` — that made a mixed range show an interval that never
+  // ticked, with no feedback that it was inert.
+  const relativeActive = until === 'now' || !until;
 
   // Ticking is only armed when there is a known interval AND the range is
   // relative-ending-at-now; re-registers whenever either changes so a range

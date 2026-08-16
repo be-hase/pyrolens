@@ -10,7 +10,10 @@ import { defineConfig, devices } from '@playwright/test';
 // disables install scripts); run `yarn playwright install chromium` once.
 
 const UI_PORT = 4141;
-const UPSTREAM_PORT = 4142;
+// Exported so helpers.ts's upstreamLog()/clearUpstreamLog() hit the same
+// port this file wires the fake up on, instead of a second hardcoded 4142
+// that could silently drift from it.
+export const UPSTREAM_PORT = 4142;
 // A second pair, wired to a fake that does not ask for a tenant, so the flow
 // where no tenant UI appears at all is exercised too.
 const SINGLE_UI_PORT = 4143;
@@ -71,7 +74,11 @@ export default defineConfig({
     {
       command: `./pyrolens -listen 127.0.0.1:${UI_PORT} -pyroscope-url http://127.0.0.1:${UPSTREAM_PORT}`,
       url: `http://127.0.0.1:${UI_PORT}/healthz`,
-      reuseExistingServer: !process.env.CI,
+      // Never reuse a leaked ./pyrolens: it embeds the UI at build time
+      // (AGENTS.md), so a stale process from an earlier run would serve last
+      // build's assets while this run believes it is testing the current
+      // one — a leftover green run proving nothing.
+      reuseExistingServer: false,
       stdout: 'pipe',
     },
     {
@@ -84,7 +91,8 @@ export default defineConfig({
     {
       command: `./pyrolens -listen 127.0.0.1:${SINGLE_UI_PORT} -pyroscope-url http://127.0.0.1:${SINGLE_UPSTREAM_PORT}`,
       url: `http://127.0.0.1:${SINGLE_UI_PORT}/healthz`,
-      reuseExistingServer: !process.env.CI,
+      // Same reasoning as the other ./pyrolens entry above.
+      reuseExistingServer: false,
       stdout: 'pipe',
     },
   ],

@@ -41,3 +41,4 @@ dist-ssr
 
 # Coverage output
 /coverage/
+/dev/loadgen/loadgen

@@ -119,7 +119,23 @@ describe('RefreshPicker', () => {
       nav.cleanup();
     });
 
-    it('does not tick when the range is absolute', () => {
+    it('ticks for a mixed absolute-from / until=now range (clipboard interop)', () => {
+      // Pasting a Grafana clipboard range with a relative "now" endpoint
+      // deliberately produces from=<absolute ms>&until=now (see
+      // parseClipboardRange) — a fixed start, a moving end. Eligibility is
+      // about the end, not the start: `until === 'now'` is exactly what a
+      // tick advances, and the pinned start must not disqualify it.
+      at('/?refresh=30s');
+      render(<RefreshPicker from="1700000000000" until="now" />);
+      const nav = countNavigations();
+
+      act(() => vi.advanceTimersByTime(30_000));
+      assert.equal(nav.count, 1);
+
+      nav.cleanup();
+    });
+
+    it('does not tick when the range is fully absolute', () => {
       at('/?refresh=30s');
       render(<RefreshPicker from="1700000000000" until="1700003600000" />);
       const nav = countNavigations();

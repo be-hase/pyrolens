@@ -12,6 +12,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"mime"
@@ -274,6 +275,28 @@ var allowedResponseHeaders = map[string]bool{
 	"Vary":             true,
 }
 
+// trailerStrippingBody wraps an upstream response body so that the instant
+// Read first reports io.EOF, resp.Trailer is emptied before control returns
+// to httputil.ReverseProxy — which reads resp.Trailer only after that same
+// EOF ends its body-copy loop. This is the fix for a leak nil'ing
+// resp.Trailer in ModifyResponse cannot close on its own: net/http populates
+// (or, when nil, outright replaces) resp.Trailer from the wire precisely at
+// that EOF, later than ModifyResponse runs, so anything set there is stale
+// again by the time ReverseProxy checks it. Clearing it here, after the
+// population but before the check, is the only point that is late enough.
+type trailerStrippingBody struct {
+	io.ReadCloser
+	resp *http.Response
+}
+
+func (b *trailerStrippingBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err == io.EOF {
+		b.resp.Trailer = nil
+	}
+	return n, err
+}
+
 // newProxy builds the reverse proxy to the Pyroscope server. authUser and
 // authPass are empty when the operator configured no upstream credentials;
 // resolvePyroscopeAuth is what guarantees they are either both set or both
@@ -356,6 +379,29 @@ func newProxy(target *url.URL, authUser, authPass string) *httputil.ReverseProxy
 				resp.Header.Del(h)
 			}
 		}
+		// Trailers are the third path bytes reach the client — header,
+		// body, trailer — and the allowlist is supposed to cover all three,
+		// but resp.Header above is not where trailers live: ReverseProxy
+		// forwards resp.Trailer as its own pass, after ModifyResponse and
+		// after the body copy, so a chunked upstream could ride a
+		// Set-Cookie past every check above as a TRAILER instead of a
+		// header. Clearing resp.Trailer here stops the pre-body "Trailer:"
+		// announcement (built from this field, not resp.Header), but it
+		// does NOT survive by itself: net/http's body.readTrailer merges
+		// the wire trailers into this exact field the instant Read first
+		// reports io.EOF — which happens later, during the body copy — and
+		// when the field is nil at that point (as we just made it) that
+		// merge is an outright reassignment, `resp.Trailer = <whatever
+		// arrived>`, undeclared entries included. Proven by running the
+		// regression test with only this line: it still failed, trailers
+		// still reached the client. Wrapping the body below is what
+		// actually closes it, by re-clearing the field at the one moment
+		// after that reassignment and before ReverseProxy's post-copy check
+		// forwards whatever is left in it.
+		resp.Trailer = nil
+		if resp.Body != nil {
+			resp.Body = &trailerStrippingBody{ReadCloser: resp.Body, resp: resp}
+		}
 		return nil
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
@@ -387,9 +433,13 @@ func newHandler(dist fs.FS, index []byte, gzipped map[string][]byte, proxy http.
 		fmt.Fprintln(w, "ok")
 	})
 
-	// One route per RPC, method included, so the mux does the matching: a verb
-	// the client never sends is a 405 and an RPC the UI does not call is a 404,
-	// both before anything reaches the proxy. Exact paths also settle path
+	// One route per RPC, method included, so the mux does the matching: a
+	// verb the client never sends does not match the POST-only route, and
+	// falls through to the methodless subtree registered below, which
+	// answers 404 the same as an RPC the UI does not call — both before
+	// anything reaches the proxy (main_test.go's
+	// TestQuerierRoutesArePostOnly documents this; it is not a 405, since
+	// that subtree fallback exists at all). Exact paths also settle path
 	// traversal — an encoded "%2e%2e%2f" decodes into the method name and
 	// matches no route.
 	forward := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

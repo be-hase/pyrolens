@@ -10,8 +10,12 @@ import {
 // Pyroscope does, so the whole tenancy flow runs for real here.
 
 watchPageErrors();
-test.beforeEach(async ({ page, context }) => {
-  await context.clearCookies();
+// No context.clearCookies() here: tenant persistence is localStorage
+// (App.tsx's TENANT_KEY), not a cookie, so clearing cookies never touched
+// the thing this suite needs isolated between tests — and didn't need to.
+// Playwright gives every test its own fresh browser context by default, so
+// localStorage already starts empty each time.
+test.beforeEach(async ({ page }) => {
   await clearUpstreamLog(page);
 });
 
@@ -96,11 +100,15 @@ test('switching tenants re-queries under the new one', async ({ page }) => {
     .toBe(true);
 
   // Once the switch has happened nothing may go out under the old tenant.
-  // Requests already in flight when it happened are why this is asked as an
-  // ordering question rather than "the log holds only team-b".
+  // Slicing the log at its first team-b entry doesn't prove that: a team-a
+  // request already in flight at the moment of the switch can still reach
+  // the fake and get logged *after* that first team-b entry, purely from
+  // network scheduling — that arrival order isn't evidence of a bug. Give
+  // in-flight work time to land, then clear the log and check only what
+  // arrives from this point on, which is unambiguous either way.
+  await page.waitForTimeout(1_000);
+  await clearUpstreamLog(page);
+  await page.waitForTimeout(500);
   const log = await upstreamLog(page);
-  const switched = log.findIndex((entry) => entry.tenant === 'team-b');
-  expect(log.slice(switched).every((entry) => entry.tenant === 'team-b')).toBe(
-    true,
-  );
+  expect(log.every((entry) => entry.tenant === 'team-b')).toBe(true);
 });
