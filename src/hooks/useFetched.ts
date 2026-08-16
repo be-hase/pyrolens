@@ -12,6 +12,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 //   response over the current one.
 // - The previous error is cleared when a new fetch starts, so a fixed
 //   query does not keep showing the failure of the one before it.
+// - `fetchError` is scoped to the key it happened for (`errorKey`), the same
+//   way `data` is scoped by `dataKey`. It is set inside `run()`, a passive
+//   effect that fires after paint, so the render between a deps change and
+//   that effect landing would otherwise still be holding the previous key's
+//   error — reporting `fetching: true` while also painting a stale failure
+//   in place of the spinner, wrongly attributed to the new key.
 // - A fetch that is due but has not started counts as loading, so the gap
 //   before the effect runs never renders as an answer.
 // - Data from a superseded key is only shown while a newer fetch is still
@@ -61,6 +67,10 @@ export function useFetched<T>(
   // result or error.
   const [dataKey, setDataKey] = useState<string | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  // The key `fetchError` was actually produced for — mirrors `dataKey` so a
+  // superseded key's failure does not paint against the key that replaced
+  // it during the gap before the next run's effect clears it.
+  const [errorKey, setErrorKey] = useState<string | null>(null);
   // The run a fetch has actually been started for (key plus attempt — see
   // `runId` below), and whether that fetch is still running. The effect only
   // runs after the commit, so between a deps/attempt change and that effect
@@ -108,6 +118,7 @@ export function useFetched<T>(
       } catch (e: unknown) {
         if (controller.signal.aborted) return;
         setFetchError(e instanceof Error ? e.message : String(e));
+        setErrorKey(key);
       } finally {
         if (!controller.signal.aborted) setInFlight(false);
       }
@@ -128,7 +139,9 @@ export function useFetched<T>(
   return {
     data: showStored ? data : stableInitial,
     fetching,
-    fetchError,
+    // Suppress a superseded key's failure during the gap before its
+    // successor's effect has run (and cleared it) — see the header comment.
+    fetchError: errorKey === key ? fetchError : null,
     retry,
   };
 }

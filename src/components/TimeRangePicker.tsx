@@ -3,7 +3,12 @@ import { Button } from '@components/core/Button';
 import { Dropdown } from '@components/core/Dropdown';
 import { Icon } from '@components/core/Icon';
 import { copyText } from '../clipboard';
-import { formatRangeLabel, isRelative, type TimeRange } from '../time';
+import {
+  formatRangeLabel,
+  isRelative,
+  resolveTime,
+  type TimeRange,
+} from '../time';
 import { navigate } from '../urlState';
 import './TimeRangePicker.css';
 
@@ -179,10 +184,27 @@ function parseClipboardRange(
   const to = parseClipboardTimeValue(rawTo);
   if (!from || !to) return null;
 
+  const fromValue = 'relative' in from ? from.relative : String(from.ms);
+  const untilValue = 'relative' in to ? to.relative : String(to.ms);
+
+  // Each endpoint parses independently above, but a reversed or zero-length
+  // range (from >= to) is not a no-op if let through: navigate() writes it
+  // to the URL, resolveRange (src/time.ts) then falls back to its own fixed
+  // 1h window since start >= end, and the screen silently lands on a span
+  // the pasted text never named. Resolving both sides through the same
+  // resolveTime rule set (relative or absolute — either already produced by
+  // parseClipboardTimeValue above) against ONE `now`, captured once here
+  // rather than once per side, keeps a relative "now" and an absolute
+  // instant comparable without a few milliseconds of clock drift between
+  // them deciding the outcome.
+  const nowMs = Date.now();
+  const fromMs = resolveTime(fromValue, NaN, nowMs);
+  const untilMs = resolveTime(untilValue, NaN, nowMs);
+  if (!(fromMs < untilMs)) return null;
+
   return {
-    from: 'relative' in from ? from.relative : String(from.ms),
-    until:
-      rawTo === 'now' ? null : 'relative' in to ? to.relative : String(to.ms),
+    from: fromValue,
+    until: rawTo === 'now' ? null : untilValue,
   };
 }
 
@@ -522,7 +544,17 @@ export function TimeRangePicker({
   const draftUntilMs = parseLocalInput(draft.until);
   const fromOk = Number.isFinite(draftFromMs);
   const untilOk = Number.isFinite(draftUntilMs);
-  const valid = fromOk && untilOk && draftFromMs < draftUntilMs;
+  // Below MIN_EPOCH_MS, resolveTime (src/time.ts) reads the value back as
+  // unix SECONDS rather than ms — the same threshold the clipboard paste
+  // path (boundedMs, above) already guards. Without it here, a date like
+  // 1970-01-20 parses to a plausible-looking ms value that Apply would
+  // happily write to the URL, and the very next read of that URL would
+  // silently land on a wildly later date (~2022) instead.
+  const belowThreshold =
+    (fromOk && draftFromMs < MIN_EPOCH_MS) ||
+    (untilOk && draftUntilMs < MIN_EPOCH_MS);
+  const valid =
+    fromOk && untilOk && draftFromMs < draftUntilMs && !belowThreshold;
 
   const apply = () => {
     if (!valid) return;
@@ -945,7 +977,9 @@ export function TimeRangePicker({
               ? `${formatDuration(draftUntilMs - draftFromMs)} range`
               : !fromOk || !untilOk
                 ? 'Use YYYY-MM-DD HH:mm:ss (local time)'
-                : 'End must be after start'}
+                : belowThreshold
+                  ? 'Date is too far in the past'
+                  : 'End must be after start'}
           </div>
           <Button
             variant="primary"

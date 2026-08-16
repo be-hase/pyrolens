@@ -54,13 +54,15 @@ test('requests go out without a tenant header', async ({ page }) => {
   ).toBe(true);
 });
 
-test('a tenant pasted into the URL still rides along, and is harmless', async ({
+test('a tenant pasted into the URL is stripped once single-tenant is confirmed', async ({
   page,
 }) => {
   // Someone pastes a link from a multitenant deployment. The header follows
-  // the URL param unconditionally — it is synced at module load, before the
-  // probe can know what kind of server this is — and a server started without
-  // multitenancy ignores it. What must not happen is tenant UI appearing.
+  // the URL param unconditionally at first — it is synced at module load,
+  // before the probe can know what kind of server this is — but once the
+  // probe confirms single-tenant, that stale tenant must be dropped: a
+  // server started with an allowlist would otherwise 403 every fetch, and
+  // single-tenant mode offers no tenant UI to recover through.
   await page.request.delete('http://127.0.0.1:4144/__log');
   await page.goto(`${url('/')}&tenant=team-a`);
   await expect(page.locator('.plfg-metadata-pill').first()).toBeVisible();
@@ -69,6 +71,9 @@ test('a tenant pasted into the URL still rides along, and is harmless', async ({
   await expect(
     page.getByRole('dialog', { name: 'Enter a Tenant ID' }),
   ).toBeHidden();
+  await expect(page).toHaveURL(
+    (current) => !current.searchParams.has('tenant'),
+  );
 
   const log = await (
     await page.request.get('http://127.0.0.1:4144/__log')
@@ -77,7 +82,11 @@ test('a tenant pasted into the URL still rides along, and is harmless', async ({
     (entry: { method: string }) => entry.method !== 'LabelNames',
   );
   expect(queries.length).toBeGreaterThan(0);
-  expect(
-    queries.every((e: { tenant: string | null }) => e.tenant === 'team-a'),
-  ).toBe(true);
+  // End state, not the flash: one team-a request can physically reach the
+  // fake before the strip's navigation supersedes it (an abort doesn't
+  // un-send bytes already on the wire), but that request is discarded and
+  // the settled query carries no tenant — which is what recovers an
+  // allowlist deployment. Assert the last query, not every one.
+  const last = queries[queries.length - 1] as { tenant: string | null };
+  expect(last.tenant).toBe(null);
 });

@@ -144,6 +144,20 @@ export function App() {
   const tenantID = status === 'multi' ? tenant : undefined;
   const [changingTenant, setChangingTenant] = useState(false);
 
+  // A shared link can carry `?tenant=bar` from a multitenant deployment. If
+  // the probe here comes back single-tenant, that tenant must not keep
+  // riding along on every request — under an allowlisted upstream it would
+  // 403 every fetch, and single-tenant mode has no tenant UI to recover
+  // from that. Stripping it with a replace-navigation fires the
+  // module-level `pyroscope:navigate` listener (`syncTenantFromUrl`)
+  // synchronously, so the API client's tenant is cleared before the next
+  // fetch runs.
+  useEffect(() => {
+    if (status === 'single' && tenant) {
+      navigate({ set: { tenant: null }, replace: true });
+    }
+  }, [status, tenant]);
+
   // Tenant remembered from the previous visit (read once at app load).
   const [storedTenant] = useState(() => localStorage.getItem(TENANT_KEY));
 

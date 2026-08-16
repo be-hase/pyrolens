@@ -108,6 +108,54 @@ export function previousPeriodParams(
   };
 }
 
+// A pane's missing bound resolves to a different default half depending on
+// which side it's on (left's absent `until` is the main midpoint, right's
+// absent `from` is the same midpoint but *its* default, not left's) — so a
+// null override can't cross sides verbatim without landing on the wrong
+// default. This completes a side's window into an explicit {from, until}
+// pair before it moves: an overridden bound keeps its raw string, an absent
+// one is filled from that side's own resolved default, preferring a
+// relative expression (so the swapped pane keeps sliding with "now" instead
+// of freezing) when the main range is relative and the default divides into
+// whole seconds.
+function completedPaneWindow(
+  side: 'left' | 'right',
+  pane: PaneParams,
+  isRelativeMain: boolean,
+  mainSpan: number,
+): { from: string; until: string } {
+  const halfSeconds = mainSpan / 2 / 1000;
+  const fullSeconds = mainSpan / 1000;
+  // Left's default `from` is the main start (whole span from "now"); right's
+  // default `from` is the midpoint (half span from "now").
+  const relFrom =
+    side === 'left'
+      ? mainSpan % 1000 === 0
+        ? `now-${fullSeconds}s`
+        : null
+      : mainSpan % 2000 === 0
+        ? `now-${halfSeconds}s`
+        : null;
+  // Left's default `until` is the midpoint; right's default `until` is the
+  // main end, i.e. exactly "now" (mainRange.end === now, see
+  // useComparisonParams), so it's always expressible when the main range is
+  // relative.
+  const relUntil =
+    side === 'left'
+      ? mainSpan % 2000 === 0
+        ? `now-${halfSeconds}s`
+        : null
+      : 'now';
+
+  const from =
+    pane.fromOverride ??
+    (isRelativeMain && relFrom != null ? relFrom : String(pane.range.start));
+  const until =
+    pane.untilOverride ??
+    (isRelativeMain && relUntil != null ? relUntil : String(pane.range.end));
+  return { from, until };
+}
+
 // Params for the Comparison/Diff "Swap sides" action: exchanges the two
 // panes' queries and windows.
 export function swappedPaneParams(
@@ -126,23 +174,42 @@ export function swappedPaneParams(
     rightQuery: left.queryOverride,
   };
 
-  // Case 1: at least one side carries an explicit bound. Swap the raw
-  // overrides verbatim, not the resolved values — resolving first and
-  // writing absolute numbers would pin a pane that was still tracking the
-  // main range's half (or the other pane's relative bound) to a fixed
-  // instant, silently freezing it.
+  // Case 1: at least one side carries an explicit bound. An overridden bound
+  // moves as its raw string — resolving it first and writing an absolute
+  // number would pin a pane that was tracking a relative bound to a fixed
+  // instant, silently freezing it. But a bound left *absent* can't move as
+  // null: null means "this side's default half", and the default half
+  // differs per side, so a null crossing from one side to the other resolves
+  // against the wrong side's default instead of reproducing the window it
+  // came from. completedPaneWindow fills in only the absent bounds (from
+  // that side's own resolved default) before the window moves.
   if (
     left.fromOverride != null ||
     left.untilOverride != null ||
     right.fromOverride != null ||
     right.untilOverride != null
   ) {
+    const isRelativeMain =
+      isRelative(mainFrom) && (mainUntil === 'now' || !mainUntil);
+    const mainSpan = mainRange.end - mainRange.start;
+    const leftWindow = completedPaneWindow(
+      'left',
+      left,
+      isRelativeMain,
+      mainSpan,
+    );
+    const rightWindow = completedPaneWindow(
+      'right',
+      right,
+      isRelativeMain,
+      mainSpan,
+    );
     return {
       ...queries,
-      leftFrom: right.fromOverride,
-      leftUntil: right.untilOverride,
-      rightFrom: left.fromOverride,
-      rightUntil: left.untilOverride,
+      leftFrom: rightWindow.from,
+      leftUntil: rightWindow.until,
+      rightFrom: leftWindow.from,
+      rightUntil: leftWindow.until,
     };
   }
 

@@ -233,6 +233,211 @@ describe('swappedPaneParams', () => {
     });
   });
 
+  describe('a partial or one-sided override (Case 1)', () => {
+    // Case 1 used to swap the raw overrides verbatim, null included. A null
+    // override means "this side's default half", and the default half
+    // differs per side, so a null landing on the *other* side resolved to
+    // that side's own default instead of reproducing the window it came
+    // from. These cover every shape of "not fully explicit on both sides".
+
+    it('exchanges the resolved windows for a left-from-only override', () => {
+      const x = START + 300_000;
+      at(`/comparison?leftFrom=${x}`);
+      const { left, right } = panes();
+      assert.deepEqual(left.range, { start: x, end: MID });
+      assert.deepEqual(right.range, { start: MID, end: END });
+
+      assert.deepEqual(
+        swappedPaneParams(left, right, RANGE, String(START), String(END)),
+        {
+          leftQuery: null,
+          rightQuery: null,
+          // Old right's default window [MID, END].
+          leftFrom: String(MID),
+          leftUntil: String(END),
+          // Old left's actual window [x, MID], not the [START, MID] default.
+          rightFrom: String(x),
+          rightUntil: String(MID),
+        },
+      );
+    });
+
+    it('exchanges the resolved windows for a left-until-only override', () => {
+      const u = START + 600_000;
+      at(`/comparison?leftUntil=${u}`);
+      const { left, right } = panes();
+      assert.deepEqual(left.range, { start: START, end: u });
+      assert.deepEqual(right.range, { start: MID, end: END });
+
+      assert.deepEqual(
+        swappedPaneParams(left, right, RANGE, String(START), String(END)),
+        {
+          leftQuery: null,
+          rightQuery: null,
+          leftFrom: String(MID),
+          leftUntil: String(END),
+          rightFrom: String(START),
+          rightUntil: String(u),
+        },
+      );
+    });
+
+    it('exchanges the resolved windows for a right-from-only override', () => {
+      const y = MID + 300_000;
+      at(`/comparison?rightFrom=${y}`);
+      const { left, right } = panes();
+      assert.deepEqual(left.range, { start: START, end: MID });
+      assert.deepEqual(right.range, { start: y, end: END });
+
+      assert.deepEqual(
+        swappedPaneParams(left, right, RANGE, String(START), String(END)),
+        {
+          leftQuery: null,
+          rightQuery: null,
+          rightFrom: String(START),
+          rightUntil: String(MID),
+          leftFrom: String(y),
+          leftUntil: String(END),
+        },
+      );
+    });
+
+    it('exchanges the resolved windows for a right-until-only override', () => {
+      const v = MID + 600_000;
+      at(`/comparison?rightUntil=${v}`);
+      const { left, right } = panes();
+      assert.deepEqual(left.range, { start: START, end: MID });
+      assert.deepEqual(right.range, { start: MID, end: v });
+
+      assert.deepEqual(
+        swappedPaneParams(left, right, RANGE, String(START), String(END)),
+        {
+          leftQuery: null,
+          rightQuery: null,
+          leftFrom: String(MID),
+          leftUntil: String(v),
+          rightFrom: String(START),
+          rightUntil: String(MID),
+        },
+      );
+    });
+
+    it('exchanges a fully-explicit left with a still-default right', () => {
+      const left: PaneParams = {
+        side: 'left',
+        query: '{service_name="a"}',
+        queryOverride: '{service_name="a"}',
+        range: { start: START, end: START + 900_000 },
+        fromOverride: String(START),
+        untilOverride: String(START + 900_000),
+      };
+      const right: PaneParams = {
+        side: 'right',
+        query: MAIN_QUERY,
+        queryOverride: null,
+        range: { start: MID, end: END },
+        fromOverride: null,
+        untilOverride: null,
+      };
+
+      assert.deepEqual(
+        swappedPaneParams(left, right, RANGE, String(START), String(END)),
+        {
+          leftQuery: null,
+          rightQuery: '{service_name="a"}',
+          // Old right's default window, not raw nulls.
+          leftFrom: String(MID),
+          leftUntil: String(END),
+          // Old left's explicit window, unchanged.
+          rightFrom: String(START),
+          rightUntil: String(START + 900_000),
+        },
+      );
+    });
+
+    it('exchanges a fully-explicit right with a still-default left', () => {
+      const left: PaneParams = {
+        side: 'left',
+        query: MAIN_QUERY,
+        queryOverride: null,
+        range: { start: START, end: MID },
+        fromOverride: null,
+        untilOverride: null,
+      };
+      const right: PaneParams = {
+        side: 'right',
+        query: '{service_name="b"}',
+        queryOverride: '{service_name="b"}',
+        range: { start: MID + 100_000, end: MID + 700_000 },
+        fromOverride: String(MID + 100_000),
+        untilOverride: String(MID + 700_000),
+      };
+
+      assert.deepEqual(
+        swappedPaneParams(left, right, RANGE, String(START), String(END)),
+        {
+          leftQuery: '{service_name="b"}',
+          rightQuery: null,
+          // Old right's explicit window, unchanged.
+          leftFrom: String(MID + 100_000),
+          leftUntil: String(MID + 700_000),
+          // Old left's default window, not raw nulls.
+          rightFrom: String(START),
+          rightUntil: String(MID),
+        },
+      );
+    });
+
+    it('prefers a relative form for the completed default bound under a relative main range', () => {
+      const x = START + 300_000;
+      at(`/comparison?leftFrom=${x}`);
+      const { left, right } = panes();
+
+      assert.deepEqual(swappedPaneParams(left, right, RANGE, 'now-1h', 'now'), {
+        leftQuery: null,
+        rightQuery: null,
+        // Old right's default half, expressed relatively so it keeps
+        // sliding with "now" instead of freezing at today's MID/END.
+        leftFrom: 'now-1800s',
+        leftUntil: 'now',
+        // Old left's actual window: the explicit bound moves verbatim, the
+        // absent one completes to a relative default.
+        rightFrom: String(x),
+        rightUntil: 'now-1800s',
+      });
+    });
+
+    it('falls back to absolute for the completed bound when the relative default is not evenly expressible', () => {
+      // Same shape as the relative case above, but the main span has a
+      // sub-second remainder that "now-Ns" cannot express exactly.
+      const oddRange = { start: START, end: END + 1 };
+      const mid2 = Math.round((oddRange.start + oddRange.end) / 2);
+      const x = START + 300_000;
+      at(`/comparison?leftFrom=${x}`);
+      const { left, right } = renderHook(() =>
+        useComparisonParams(MAIN_QUERY, oddRange),
+      ).result.current;
+      assert.deepEqual(left.range, { start: x, end: mid2 });
+      assert.deepEqual(right.range, { start: mid2, end: oddRange.end });
+
+      assert.deepEqual(
+        swappedPaneParams(left, right, oddRange, 'now-1h', 'now'),
+        {
+          leftQuery: null,
+          rightQuery: null,
+          // The default `from` for the right pane doesn't divide evenly, so
+          // it completes to the resolved absolute ms instead of "now-Ns".
+          leftFrom: String(mid2),
+          // The right pane's default `until` is exactly "now" regardless of
+          // divisibility (it's the main range's end, by construction).
+          leftUntil: 'now',
+          rightFrom: String(x),
+          rightUntil: String(mid2),
+        },
+      );
+    });
+  });
+
   describe('both panes at their defaults', () => {
     it('falls back to exchanging the resolved halves under an absolute main range', () => {
       at('/comparison');

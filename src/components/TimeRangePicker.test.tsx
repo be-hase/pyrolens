@@ -167,6 +167,46 @@ describe('TimeRangePicker', () => {
     );
   });
 
+  it('refuses a from date old enough to be misread as unix seconds', () => {
+    // resolveTime (src/time.ts) reads any URL value below MIN_EPOCH_MS back
+    // as unix SECONDS, not ms. A date this old parses to a plausible-looking
+    // ms value, so without this guard Apply would happily navigate to a
+    // `from` that reads back on the wrong side of that heuristic (~2022
+    // instead of 1970).
+    open();
+    fireEvent.change(field('From'), {
+      target: { value: '1970-01-20 00:00:00' },
+    });
+    fireEvent.change(field('To'), {
+      target: { value: '2026-01-02 17:30:00' },
+    });
+    const apply = screen.getByRole('button', {
+      name: 'Apply time range',
+    }) as HTMLButtonElement;
+    assert.equal(apply.disabled, true);
+    assert.ok(screen.getByText('Date is too far in the past'));
+
+    fireEvent.click(apply);
+    assert.equal(params().has('from'), false);
+  });
+
+  it('still applies a normal absolute range above the threshold', () => {
+    open();
+    fireEvent.change(field('From'), {
+      target: { value: '2026-01-02 09:05:00' },
+    });
+    fireEvent.change(field('To'), {
+      target: { value: '2026-01-02 17:30:00' },
+    });
+    const apply = screen.getByRole('button', {
+      name: 'Apply time range',
+    }) as HTMLButtonElement;
+    assert.equal(apply.disabled, false);
+
+    fireEvent.click(apply);
+    assert.ok(params().has('from'));
+  });
+
   it('redrafts from the URL every time it opens', () => {
     // The draft is an edit buffer: reopening must not show what was abandoned.
     const trigger = open('now-1h', 'now');
@@ -718,7 +758,10 @@ describe('TimeRangePicker', () => {
     });
 
     it('accepts a real leap-day ISO date', async () => {
-      const fromIso = '2028-02-29T00:00:00Z';
+      // Must stay in the past relative to the "now" that `to: 'now'` below
+      // resolves against, or the from>=to ordering check (see the reversed-
+      // range tests) rejects it for an unrelated reason.
+      const fromIso = '2024-02-29T00:00:00Z';
       at('/?from=now-1h');
       Object.defineProperty(navigator, 'clipboard', {
         value: {
@@ -773,6 +816,95 @@ describe('TimeRangePicker', () => {
 
       await screen.findByRole('button', { name: 'Paste failed' });
       assert.equal(params().get('from'), 'now-1h');
+    });
+
+    it('rejects a reversed clipboard range (from after to)', async () => {
+      // parseClipboardRange validates each endpoint independently; without
+      // an ordering check this parses fine and navigates, then resolveRange
+      // (src/time.ts) falls back to its own fixed 1h window since
+      // start >= end, silently landing on a range the paste never named.
+      at('/?from=now-1h');
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          readText: async () =>
+            JSON.stringify({
+              from: '2026-01-02T17:30:00Z',
+              to: '2026-01-02T09:05:00Z',
+            }),
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      await screen.findByRole('button', { name: 'Paste failed' });
+      assert.equal(params().get('from'), 'now-1h');
+    });
+
+    it('rejects a zero-length clipboard range (from equals to)', async () => {
+      at('/?from=now-1h');
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          readText: async () =>
+            JSON.stringify({
+              from: '2026-01-02T09:05:00Z',
+              to: '2026-01-02T09:05:00Z',
+            }),
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      await screen.findByRole('button', { name: 'Paste failed' });
+      assert.equal(params().get('from'), 'now-1h');
+    });
+
+    it('still applies a valid forward clipboard range', async () => {
+      const fromIso = '2026-01-02T09:05:00Z';
+      const toIso = '2026-01-02T17:30:00Z';
+      at('/?from=now-1h');
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          readText: async () => JSON.stringify({ from: fromIso, to: toIso }),
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      assert.equal(params().get('from'), String(Date.parse(fromIso)));
+      assert.equal(params().get('until'), String(Date.parse(toIso)));
     });
 
     it('`t v` pastes a relative Grafana JSON range, clearing `until` for "now"', async () => {
