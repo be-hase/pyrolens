@@ -277,6 +277,81 @@ describe('useFetched', () => {
     assert.equal(result.current.fetching, false);
   });
 
+  it('does not paint a superseded key’s error during the gap before its successor’s effect runs', async () => {
+    // Bug: fetchError was cleared only inside run() (a passive effect, after
+    // paint). Deps moving from A (failed) to B (pending) leave a render
+    // between the deps change and that effect where `fetching` is already
+    // true for B but `fetchError` still held A's failure — painting A's
+    // error in B's place for one frame.
+    let failA!: (reason: unknown) => void;
+    let settleB!: (value: string) => void;
+    const errors: (string | null)[] = [];
+
+    const { result, rerender } = renderHook(
+      ({ q }) => {
+        const state = useFetched<string>(
+          'initial',
+          true,
+          async () => {
+            if (q === 'a') {
+              return new Promise<string>((_resolve, reject) => {
+                failA = reject;
+              });
+            }
+            return new Promise<string>((resolve) => {
+              settleB = resolve;
+            });
+          },
+          [q],
+        );
+        errors.push(state.fetchError);
+        return state;
+      },
+      { initialProps: { q: 'a' } },
+    );
+
+    await waitFor(() => assert.ok(failA));
+    act(() => failA(new Error('boom')));
+    await waitFor(() => assert.equal(result.current.fetchError, 'boom'));
+
+    errors.length = 0;
+    rerender({ q: 'b' });
+    // Every render captured while switching to B — the pre-effect gap
+    // included — must not still be reporting A's error.
+    assert.ok(
+      errors.every((value) => value === null),
+      `painted a superseded key's error: ${JSON.stringify(errors)}`,
+    );
+
+    settleB('b-data');
+    await waitFor(() => assert.equal(result.current.data, 'b-data'));
+  });
+
+  it('still surfaces a same-key retry’s error once it lands', async () => {
+    // errorKey is scoped by `key`, not `runId`, so unlike a deps change, a
+    // retry of the same key must keep showing that key's error once its
+    // effect has run — only a *different* key gets suppressed during the
+    // gap.
+    let calls = 0;
+    const { result } = renderHook(() =>
+      useFetched<string>(
+        'initial',
+        true,
+        async () => {
+          calls++;
+          throw new Error(`boom-${calls}`);
+        },
+        ['a'],
+      ),
+    );
+    await waitFor(() => assert.equal(result.current.fetchError, 'boom-1'));
+
+    act(() => {
+      result.current.retry();
+    });
+    await waitFor(() => assert.equal(result.current.fetchError, 'boom-2'));
+  });
+
   it('returns a referentially stable retry function across rerenders', async () => {
     // The lead's contract requires this so a downstream effect can sit
     // `retry` in its deps without churning on every render.

@@ -1,5 +1,5 @@
 import uFuzzy from '@leeoniya/ufuzzy';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { fetchLabelNames, fetchLabelValues } from '@api/client';
 import { useDebouncedValue } from './useDebouncedValue';
 import {
@@ -153,16 +153,43 @@ export function useLabelSuggestions({
     setValues([]);
   }
 
+  // The range/tenant the names pool must belong to right now, kept in a ref
+  // so a stale response's `.then` (below) can read it without re-rendering.
+  // Written from `useLayoutEffect`, not the ordinary (passive) effect below:
+  // a layout effect runs synchronously right after commit, in the same tick
+  // — a *passive* effect is scheduled for later, and the whole point of this
+  // ref is to beat a same-tick microtask that can run in the gap before a
+  // passive effect's cleanup fires.
+  const namesKey = `${debStart}:${debEnd}:${tenantID ?? ''}`;
+  const namesKeyRef = useRef(namesKey);
+  useLayoutEffect(() => {
+    namesKeyRef.current = namesKey;
+  });
+
   // Both success paths re-check `aborted` before writing: a response that
   // finished parsing before the abort still lands otherwise, and would stick
   // (the pool reset above has already run, so nothing refetches after it).
+  //
+  // `aborted` alone is not enough, though: the render that changes the range
+  // resets `names` and commits synchronously, but this effect's cleanup
+  // (which calls `abort()`) only runs when React later flushes passive
+  // effects. A response that finishes parsing in that window — a same-tick
+  // microtask beating a scheduled effect flush — sees `aborted === false`
+  // and would otherwise land under the new range, and since it makes
+  // `names.length` nonzero it also disarms `wantNames`, so nothing refetches
+  // until the pool key changes again. Comparing the key this fetch was
+  // started for against `namesKeyRef.current` catches that response too, and
+  // because `names` is still `[]`, `wantNames` stays true so the effect
+  // re-runs for the current range.
   const wantNames = context?.kind === 'name' && names.length === 0;
   useEffect(() => {
     if (!wantNames) return;
     const controller = new AbortController();
+    const requestKey = namesKey;
     fetchLabelNames([], debStart, debEnd, controller.signal)
       .then((ns) => {
         if (controller.signal.aborted) return;
+        if (namesKeyRef.current !== requestKey) return;
         // The server calls it `__profile_type__`; the query language shows
         // `profile_type`, so it has to be offered under that name.
         // Validated, not just filtered: applySuggestion splices the chosen
@@ -177,7 +204,7 @@ export function useLabelSuggestions({
       })
       .catch(() => {});
     return () => controller.abort();
-  }, [wantNames, debStart, debEnd, tenantID]);
+  }, [wantNames, debStart, debEnd, tenantID, namesKey]);
 
   useEffect(() => {
     if (!debLabel) return;

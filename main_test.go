@@ -558,6 +558,24 @@ func TestParsePyroscopeURLAcceptsAValidURL(t *testing.T) {
 	}
 }
 
+func TestParsePyroscopeURLRejectsNonHTTPScheme(t *testing.T) {
+	// Absolute and well-formed, but the proxy transport speaks only
+	// http/https — accepting these would start cleanly and then fail every
+	// forwarded request as an unsupported protocol scheme.
+	for _, raw := range []string{
+		"ftp://profiles.example",
+		"ws://profiles.example:4040",
+		"htttp://profiles.example",
+	} {
+		if _, err := parsePyroscopeURL(raw); err == nil {
+			t.Errorf("expected an error for %q", raw)
+		}
+	}
+	if _, err := parsePyroscopeURL("http://profiles.example:4040"); err != nil {
+		t.Errorf("http should be accepted: %v", err)
+	}
+}
+
 func TestParsePyroscopeURLRejectsURLWithNoSchemeOrHost(t *testing.T) {
 	// url.Parse itself accepts this as a valid relative reference; it just
 	// isn't usable as a proxy target.

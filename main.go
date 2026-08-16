@@ -620,7 +620,15 @@ var errInvalidPyroscopeURL = errors.New("-pyroscope-url (or PYROSCOPE_URL) is no
 // binary.
 func parsePyroscopeURL(raw string) (*url.URL, error) {
 	target, err := url.Parse(raw)
-	if err != nil || target.Scheme == "" || target.Host == "" {
+	if err != nil || target.Host == "" {
+		return nil, errInvalidPyroscopeURL
+	}
+	// Only http/https reach the proxy transport; any other absolute scheme
+	// (ftp://, ws://, a typo'd htttp://) parses fine here but makes every
+	// forwarded request fail later with "unsupported protocol scheme",
+	// which reads as an unreachable upstream rather than a misconfiguration.
+	// Reject it at startup instead. url.Parse lowercases the scheme.
+	if target.Scheme != "http" && target.Scheme != "https" {
 		return nil, errInvalidPyroscopeURL
 	}
 	return target, nil

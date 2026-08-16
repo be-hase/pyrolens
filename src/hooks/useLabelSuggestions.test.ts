@@ -16,6 +16,12 @@ vi.mock('@api/client', () => ({
 const namesOf = vi.mocked(fetchLabelNames);
 const valuesOf = vi.mocked(fetchLabelValues);
 
+function deferred<T>() {
+  let settle!: (value: T) => void;
+  const promise = new Promise<T>((resolve) => (settle = resolve));
+  return { promise, settle };
+}
+
 describe('getSuggestionContext', () => {
   it('completes a label name right after the brace', () => {
     assert.deepEqual(getSuggestionContext('{', 1), {
@@ -265,6 +271,62 @@ describe('useLabelSuggestions', () => {
     assert.equal(namesOf.mock.calls.length, 2);
     assert.equal(namesOf.mock.calls[1][2], RANGE.end + 60_000);
     assert.deepEqual(result.current.suggestions, ['region', 'pod']);
+  });
+
+  it('does not stick on a stale range after a superseded fetch beats abort()', async () => {
+    // Bug: the names effect's cleanup (`controller.abort()`) only runs when
+    // React flushes this effect's passive-effect pass, but a fetch's
+    // continuation is a microtask that can beat a *scheduled* flush — so a
+    // response can finish parsing, with `signal.aborted` still false, after
+    // the range has already moved on. `act()` makes React run that cleanup
+    // synchronously with the render that triggers it, so this harness can't
+    // reproduce the race by timing alone; neutering `abort()` for the
+    // window stands in for "abort() does nothing to an already-parsed
+    // response" without depending on real event-loop ordering.
+    const first = deferred<string[]>();
+    namesOf.mockReturnValueOnce(first.promise);
+    namesOf.mockResolvedValueOnce(['region2']);
+
+    const { result, rerender } = renderHook(
+      (p: { end: number }) =>
+        useLabelSuggestions({
+          text: '{',
+          caret: 1,
+          start: RANGE.start,
+          end: p.end,
+          enabled: true,
+        }),
+      { initialProps: { end: RANGE.end } },
+    );
+    await flush();
+    assert.equal(namesOf.mock.calls.length, 1);
+
+    const abortSpy = vi
+      .spyOn(AbortController.prototype, 'abort')
+      .mockImplementation(() => {});
+    try {
+      rerender({ end: RANGE.end + 60_000 });
+      await act(async () => {
+        vi.advanceTimersByTime(300);
+      });
+    } finally {
+      abortSpy.mockRestore();
+    }
+
+    assert.equal(namesOf.mock.calls.length, 2, 'range 2 was fetched');
+    assert.deepEqual(result.current.suggestions, ['region2']);
+
+    // The range-1 fetch finally resolves, with `signal.aborted` still false.
+    await act(async () => {
+      first.settle(['region1']);
+      await first.promise;
+    });
+
+    assert.deepEqual(
+      result.current.suggestions,
+      ['region2'],
+      'must not be clobbered by the superseded range-1 response',
+    );
   });
 
   it('survives a failed lookup with an empty list', async () => {

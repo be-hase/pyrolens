@@ -157,6 +157,32 @@ describe('App tenancy', () => {
     );
   });
 
+  it('strips a URL tenant once the probe resolves single-tenant', async () => {
+    // A shared link from a multitenant deployment can carry `?tenant=bar`.
+    // Once the probe says this server is single-tenant, that tenant must
+    // stop riding along — under an allowlisted upstream it would 403 every
+    // fetch, and single-tenant mode has no tenant UI to recover from that.
+    const order: string[] = [];
+    setTenantOf.mockImplementation((t) => void order.push(`setTenant:${t}`));
+    servicesOf.mockImplementation(async () => {
+      order.push('fetchServices');
+      return [WEB];
+    });
+    multitenancyOf.mockResolvedValue(false);
+    at('/?tenant=bar&query=%7B%7D');
+
+    render(<App />);
+    await waitFor(() => assert.ok(params().get('tenant') === null));
+    await waitFor(() => assert.ok(order.includes('fetchServices')));
+
+    assert.ok(order.includes('setTenant:undefined'));
+    assert.ok(
+      order.indexOf('setTenant:undefined') < order.lastIndexOf('fetchServices'),
+      order.join(' → '),
+    );
+    assert.equal(seen('tenant'), '');
+  });
+
   it('surfaces a failing service list without hiding the view', async () => {
     servicesOf.mockRejectedValueOnce(new Error('service list unavailable'));
     render(<App />);
