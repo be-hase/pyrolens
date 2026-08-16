@@ -107,6 +107,79 @@ test('the comparison view renders both panes', async ({ page }) => {
   await expect(page.locator('.plfg-metadata-pill').first()).toBeVisible();
 });
 
+test('a pane header shows its resolved window, with a default qualifier and a reset control for overrides', async ({
+  page,
+}) => {
+  // The left ("Baseline") pane renders first in the DOM, so its Panel is
+  // the first .panel-meta on the page; the right ("Comparison") pane is the
+  // second.
+  const leftMeta = () => page.locator('.panel-meta').first();
+  const rightMeta = () => page.locator('.panel-meta').nth(1);
+  // aria-label, not the visible "Reset window" text, disambiguates the two
+  // panes' buttons — see the comment on ComparisonPane's Button.
+  const leftReset = () =>
+    page.getByRole('button', { name: 'Reset baseline window' });
+  // A duration group, optionally a second unit ("7m 30s"), never a rounded
+  // single one — see formatDurationCompact in src/time.ts.
+  const duration = String.raw`\(\d+[dhms](?: \d+[dhms])?\)`;
+  const timestamp = String.raw`[A-Z][a-z]{2} \d{1,2} \d{2}:\d{2}`;
+
+  // (a) At defaults (no leftFrom/leftUntil in the URL), each pane silently
+  // covers its half of the main range — the qualifier leads the header text
+  // (width pressure ellipsizes from the end, and the qualifier is the one
+  // thing here with no other home) — and there is nothing to reset yet.
+  await page.goto(url('/comparison'));
+  await expect(leftMeta()).toContainText(
+    new RegExp(`^first half · ${timestamp} – ${timestamp} ${duration}$`),
+  );
+  await expect(rightMeta()).toContainText(
+    new RegExp(`^second half · ${timestamp} – ${timestamp} ${duration}$`),
+  );
+  await expect(leftReset()).toHaveCount(0);
+
+  // (b) Deep-linking an explicit window (as brushing the timeline would
+  // write) drops the "first half" qualifier — it's no longer the implicit
+  // default — and surfaces a way back to it.
+  await page.goto(
+    url('/comparison', {
+      leftFrom: meta.left.start,
+      leftUntil: meta.left.end,
+    }),
+  );
+  await expect(leftMeta()).toContainText('(1m)'); // meta.left is a 1-minute window
+  await expect(leftMeta()).not.toContainText('half');
+  await expect(leftReset()).toHaveCount(1);
+
+  // (c) Reset clears only the pane's range override — leaving leftQuery
+  // (unset here) alone is the query bar's job — and the qualifier returns.
+  await clearUpstreamLog(page);
+  await leftReset().click();
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get('leftFrom'))
+    .toBeNull();
+  expect(new URL(page.url()).searchParams.get('leftUntil')).toBeNull();
+  await expect(leftMeta()).toContainText('first half');
+  await expect(leftReset()).toHaveCount(0);
+
+  // The header text alone can't tell a genuine re-render from one that kept
+  // rendering the overridden range while merely re-adding the qualifier —
+  // confirm the pane actually re-fetched the resolved default window: the
+  // first half of the fixture's main range, computed the same way
+  // useComparisonParams does (Math.round of the midpoint).
+  const mid = Math.round((meta.window.start + meta.window.end) / 2);
+  await expect
+    .poll(async () => {
+      const log = await upstreamLog(page);
+      return log.some(
+        (entry) =>
+          entry.method === 'SelectMergeStacktraces' &&
+          entry.start === meta.window.start &&
+          entry.end === mid,
+      );
+    })
+    .toBe(true);
+});
+
 test('deep-linking fgSearch prefills the flame graph search box', async ({
   page,
 }) => {

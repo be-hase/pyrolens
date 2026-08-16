@@ -34,6 +34,10 @@ brings the classic workflow back, plus a few things the old UI never had:
   Comparison/Diff with an equal-duration window immediately before the
   current range already filled in. Comparison and Diff both have a "Swap
   sides" button to flip which window is the baseline.
+- **Pane windows are never a guess.** Each Comparison/Diff pane's header
+  shows the time window it actually resolved to, marked "first half" /
+  "second half" while it's still the implicit default; brushing or
+  deep-linking a window adds a "Reset window" button back to that default.
 
 ## The views
 

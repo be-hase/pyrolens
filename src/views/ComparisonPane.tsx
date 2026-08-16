@@ -5,7 +5,7 @@ import { TimeSeries } from '@components/TimeSeries';
 import { useTimeline } from '@hooks/useProfileData';
 import { useEditBuffer } from '@hooks/useEditBuffer';
 import { splitQuery } from '../queryLang';
-import { formatAbsoluteRange, type TimeRange } from '../time';
+import { formatPaneWindow, type TimeRange } from '../time';
 import { navigate } from '../urlState';
 import type { PaneParams } from './comparisonParams';
 
@@ -73,8 +73,56 @@ export function ComparisonPane({
 
   const [draft, setDraft] = useEditBuffer(pane.query);
 
+  // Null on both means the pane is still resolving its default half (see
+  // useComparisonParams) rather than a range the user brushed or deep-linked
+  // — worth calling out, since the default is otherwise invisible.
+  const isDefaultWindow =
+    pane.fromOverride == null && pane.untilOverride == null;
+  const hasOverride = pane.fromOverride != null || pane.untilOverride != null;
+  // The qualifier leads rather than trails: .panel-meta ellipsizes from the
+  // end under width pressure, and the timestamps it would cut are already
+  // visible on the timeline's brush — "first/second half" is the one thing
+  // here with no other home, so it has to be what survives truncation.
+  const meta = isDefaultWindow
+    ? `${pane.side === 'left' ? 'first' : 'second'} half · ${formatPaneWindow(pane.range)}`
+    : formatPaneWindow(pane.range);
+
   return (
-    <Panel title={title} meta={formatAbsoluteRange(pane.range)}>
+    <Panel
+      title={title}
+      meta={meta}
+      actions={
+        // Panel treats `actions != null` as "render the slot", so a plain
+        // `hasOverride && <Button>` would leave an empty one behind once
+        // `hasOverride` goes false (`false != null` is true). Fall through
+        // to `null` instead.
+        hasOverride ? (
+          <Button
+            // Comparison and Diff can land both panes in the override state
+            // at once (Swap, Compare-vs-previous), giving two buttons the
+            // same visible "Reset window" label — indistinguishable by
+            // accessible name alone. `title` is "Baseline" / "Comparison" in
+            // both views, so lowercasing it into the label disambiguates
+            // them without changing what's on screen.
+            aria-label={`Reset ${title.toLowerCase()} window`}
+            onClick={() =>
+              // Only the range params: the query bar owns `<side>Query` and
+              // resets it on its own terms, so this stays a window reset,
+              // not a "start over" that would surprise whoever brushed the
+              // range but kept the query they typed.
+              navigate({
+                set: {
+                  [`${pane.side}From`]: null,
+                  [`${pane.side}Until`]: null,
+                },
+              })
+            }
+          >
+            Reset window
+          </Button>
+        ) : null
+      }
+    >
       <div className="comparison-pane">
         <QueryBar
           query={draft}

@@ -88,6 +88,45 @@ export function formatAbsoluteRange({ start, end }: TimeRange): string {
   return `${fmt(start)} – ${fmt(end)}`;
 }
 
+const DURATION_UNITS: [string, number][] = [
+  ['d', 86_400_000],
+  ['h', 3_600_000],
+  ['m', 60_000],
+  ['s', 1_000],
+];
+
+/** "1h 30m" / "7m 30s" / "1d" — the two largest nonzero units, exactly (no
+ * rounding: a dropped third unit, if any, is simply floored away). A single
+ * rounded unit ("(1h)" for both 89m and 91m) misrepresents a pane window
+ * that a user just brushed to a specific span. Mirrors TimeRangePicker.tsx's
+ * `formatDuration` (drafted-range summary) rather than importing it — that
+ * component is outside this change's touch list — so the two stay aligned
+ * in shape without being the same function. */
+function formatDurationCompact(ms: number): string {
+  const parts: string[] = [];
+  let rest = ms;
+  for (const [suffix, size] of DURATION_UNITS) {
+    const n = Math.floor(rest / size);
+    if (n > 0 && parts.length < 2) {
+      parts.push(`${n}${suffix}`);
+      rest -= n * size;
+    }
+  }
+  return parts.length ? parts.join(' ') : '0s';
+}
+
+/**
+ * A Comparison/Diff pane's resolved window for its Panel header: the
+ * absolute range plus a compact duration, e.g.
+ * "Aug 7 09:30 – Aug 7 10:00 (30m)". Built on `formatAbsoluteRange` so the
+ * two never disagree about how a timestamp reads.
+ */
+export function formatPaneWindow(range: TimeRange): string {
+  return `${formatAbsoluteRange(range)} (${formatDurationCompact(
+    range.end - range.start,
+  )})`;
+}
+
 /**
  * Label for the main range button. Takes the range App already resolved
  * rather than resolving again: calling `Date.now()` here would run during
