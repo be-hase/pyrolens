@@ -29,6 +29,11 @@ brings the classic workflow back, plus a few things the old UI never had:
 - **Comparison view** colors frames by package-name hash, so the same
   function has the same color in both panes. **Diff view** shows the classic
   green/red differential flame graph (color-blind palette available).
+- **One-click baselines.** The Single view's flamegraph panel has "Compare
+  vs previous" / "Diff vs previous" buttons that jump straight into
+  Comparison/Diff with an equal-duration window immediately before the
+  current range already filled in. Comparison and Diff both have a "Swap
+  sides" button to flip which window is the baseline.
 
 ## The views
 

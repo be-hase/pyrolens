@@ -2,6 +2,7 @@ import type { ViewProps } from '../App';
 import { ControlsBar } from '@components/ControlsBar';
 import { FlameGraph } from '@components/FlameGraph';
 import { Panel } from '@components/Panel';
+import { Button } from '@components/core/Button';
 import { QueryBar } from '@components/QueryBar';
 import { TimeSeries } from '@components/TimeSeries';
 import { useFlamegraph, useTimeline } from '@hooks/useProfileData';
@@ -11,6 +12,7 @@ import { parseQuery, splitQuery } from '../queryLang';
 import { formatRangeLabel } from '../time';
 import { navigate } from '../urlState';
 import { ErrorBanner } from './ComparisonPane';
+import { previousPeriodParams } from './comparisonParams';
 
 // Kept local rather than exported from a shared module: react-refresh's
 // lint rule requires a component file's exports to be components only, so
@@ -93,6 +95,40 @@ export function SingleView({
 
       <Panel
         title="Flamegraph"
+        actions={
+          // Before the default query resolves (a bare "/" on first load),
+          // `query` is '' and splitQuery's profileTypeID comes back empty.
+          // Clicking either action then would write an explicit but empty
+          // leftQuery/rightQuery, which `params.get('leftQuery') ?? mainQuery`
+          // treats as a real override (empty string is not nullish) — pinning
+          // both panes to "no query" forever instead of inheriting whatever
+          // the main query resolves to a moment later. Hiding the actions
+          // until there is a real query to branch from avoids that.
+          profileTypeID ? (
+            <>
+              <Button
+                onClick={() =>
+                  navigate({
+                    path: '/comparison',
+                    set: previousPeriodParams(query, from, until, range),
+                  })
+                }
+              >
+                Compare vs previous
+              </Button>
+              <Button
+                onClick={() =>
+                  navigate({
+                    path: '/diff',
+                    set: previousPeriodParams(query, from, until, range),
+                  })
+                }
+              >
+                Diff vs previous
+              </Button>
+            </>
+          ) : undefined
+        }
         meta={
           fg.loading
             ? 'Loading…'

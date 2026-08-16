@@ -18,8 +18,43 @@
   color: var(--text-primary);
 }
 
+.panel-header-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  /* Without this a flex item's minimum width is its content's, so the group
+     (and the meta text inside it) could never shrink below that and would
+     push out of a narrow panel instead of truncating. */
+  min-width: 0;
+}
+
 .panel-meta {
   font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  /* The meta duplicates info available elsewhere (the query bar, the panel
+     title), so truncating it under width pressure is safe. The actions
+     next to it are the interactive part of the header and must not shrink;
+     they are left at their default (visible-overflow) sizing, which keeps
+     a flex item pinned to its content width. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Small secondary buttons for a panel's actions slot. Also reused, verbatim,
+   by the Comparison/Diff views' "Swap sides" control, which sits above a
+   panel rather than inside one — same header-row vocabulary either way, so
+   it borrows this class instead of a second definition. */
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.panel-actions .btn {
+  height: 24px;
+  padding: 0 var(--space-2);
   font-size: var(--text-xs);
   color: var(--text-secondary);
 }
