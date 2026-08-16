@@ -12,8 +12,15 @@ import {
 import { useDiffFlamegraph } from '@hooks/useProfileData';
 import { useFlameGraphUrlState } from '@hooks/useFlameGraphUrlState';
 import { splitQuery } from '../queryLang';
-import { ComparisonPane } from './ComparisonPane';
+import { ComparisonPane, ErrorBanner } from './ComparisonPane';
 import { useComparisonParams } from './comparisonParams';
+
+// Adapted from FLAMEGRAPH_EMPTY_MESSAGE (SingleView.tsx / ComparisonView.tsx):
+// a diff has two windows, so either one — not "this range" — could be why
+// there is nothing to compare.
+const DIFF_EMPTY_MESSAGE =
+  'No profiles matched this query in the baseline or comparison window. ' +
+  'Recently ingested profiles can take about a minute to become queryable.';
 
 // Differential flame graph between the Baseline and Comparison selections.
 // Green = less time than baseline, red = more (share-of-total normalized).
@@ -34,7 +41,7 @@ export function DiffView({
   const { search, onSearchChange, sandwichItem, onSandwichChange } =
     useFlameGraphUrlState();
 
-  const { diff, loading, error } = useDiffFlamegraph({
+  const { diff, loading, error, retry } = useDiffFlamegraph({
     leftQuery: left.query,
     rightQuery: right.query,
     leftRange: left.range,
@@ -48,6 +55,15 @@ export function DiffView({
   const dataFrame = useMemo(
     () => (diff ? diffFlamebearerToDataFrame(diff, unit) : undefined),
     [diff, unit],
+  );
+
+  // No-frames placeholder for when dataFrame is falsy. While loading, the
+  // panel's own "Loading…" meta above already says so — see FlameGraph's
+  // identical reasoning for rendering nothing rather than a second,
+  // redundant message. And no contextual claim while the banner already
+  // shows this fetch's error — see FlameGraph's identical gate.
+  const diffEmpty = loading ? null : (
+    <Empty message={error ? undefined : DIFF_EMPTY_MESSAGE} />
   );
 
   return (
@@ -77,7 +93,7 @@ export function DiffView({
         />
       </div>
 
-      {error && <div className="app-error">{error}</div>}
+      {error && <ErrorBanner error={error} retry={retry} />}
 
       <Panel title="Diff flamegraph" meta={loading ? 'Loading…' : undefined}>
         {dataFrame ? (
@@ -91,7 +107,7 @@ export function DiffView({
             />
           </div>
         ) : (
-          <Empty />
+          diffEmpty
         )}
       </Panel>
     </div>

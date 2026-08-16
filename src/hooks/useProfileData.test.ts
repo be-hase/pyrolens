@@ -84,6 +84,8 @@ describe('useFlamegraph', () => {
     );
     await waitFor(() => assert.equal(result.current.error, 'upstream is down'));
     assert.equal(result.current.loading, false);
+    // A fetch actually ran and failed, so retrying it is meaningful.
+    assert.equal(typeof result.current.retry, 'function');
   });
 
   it('explains a malformed query instead of fetching', async () => {
@@ -93,6 +95,10 @@ describe('useFlamegraph', () => {
     assert.match(result.current.error ?? '', /Could not parse the query/);
     assert.equal(result.current.loading, false);
     assert.equal(flamegraphOf.mock.calls.length, 0);
+    // No fetch ever started for this query, so retry() would just bump a
+    // counter into an effect that early-returns — the hook must not offer
+    // it, or the view renders a Retry button that does nothing.
+    assert.equal(result.current.retry, undefined);
   });
 
   it('explains a conflicting profile_type instead of fetching', () => {
@@ -107,6 +113,7 @@ describe('useFlamegraph', () => {
     assert.equal(result.current.error, PROFILE_TYPE_MESSAGE);
     assert.equal(result.current.loading, false);
     assert.equal(flamegraphOf.mock.calls.length, 0);
+    assert.equal(result.current.retry, undefined);
   });
 
   it('explains an explicit empty profile_type instead of fetching', () => {
@@ -249,6 +256,20 @@ describe('useFlamegraph', () => {
     rerender({ enabled: true });
     assert.equal(flamegraphOf.mock.calls.length, 1);
   });
+
+  it('exposes retry, which triggers another fetch', async () => {
+    const { result } = renderHook(() =>
+      useFlamegraph({ query: QUERY, range: RANGE }),
+    );
+    await waitFor(() => assert.equal(flamegraphOf.mock.calls.length, 1));
+
+    const { retry } = result.current;
+    assert.ok(retry);
+    act(() => {
+      retry();
+    });
+    assert.equal(flamegraphOf.mock.calls.length, 2);
+  });
 });
 
 describe('useTimeline', () => {
@@ -276,11 +297,13 @@ describe('useTimeline', () => {
       useTimeline({ query: QUERY, range: RANGE }),
     );
     await waitFor(() => assert.equal(result.current.error, 'nope'));
+    assert.equal(typeof result.current.retry, 'function');
 
     const malformed = renderHook(() =>
       useTimeline({ query: 'garbage {{{', range: RANGE }),
     );
     assert.match(malformed.result.current.error ?? '', /Could not parse/);
+    assert.equal(malformed.result.current.retry, undefined);
   });
 
   it('ignores a superseded response that lands late', async () => {
@@ -301,6 +324,20 @@ describe('useTimeline', () => {
       await first.promise;
     });
     assert.deepEqual(result.current.timeline, [{ timestamp: 2, value: 2 }]);
+  });
+
+  it('exposes retry, which triggers another fetch', async () => {
+    const { result } = renderHook(() =>
+      useTimeline({ query: QUERY, range: RANGE }),
+    );
+    await waitFor(() => assert.equal(timelineOf.mock.calls.length, 1));
+
+    const { retry } = result.current;
+    assert.ok(retry);
+    act(() => {
+      retry();
+    });
+    assert.equal(timelineOf.mock.calls.length, 2);
   });
 });
 
@@ -351,6 +388,7 @@ describe('useDiffFlamegraph', () => {
     assert.match(result.current.error ?? '', /Could not parse the query/);
     assert.equal(result.current.loading, false);
     assert.equal(diffOf.mock.calls.length, 0);
+    assert.equal(result.current.retry, undefined);
   });
 
   it('drops the error as soon as a pane has nothing to fetch', async () => {
@@ -368,8 +406,29 @@ describe('useDiffFlamegraph', () => {
     await waitFor(() =>
       assert.equal(result.current.error, 'deadline exceeded'),
     );
+    // A fetch actually ran and failed, so retrying it is meaningful.
+    assert.equal(typeof result.current.retry, 'function');
     rerender({ rightQuery: '{service_name="api"}' });
     assert.equal(result.current.error, null);
     assert.equal(result.current.loading, false);
+  });
+
+  it('exposes retry, which triggers another fetch', async () => {
+    const { result } = renderHook(() =>
+      useDiffFlamegraph({
+        leftQuery: QUERY,
+        rightQuery: OTHER,
+        leftRange: LEFT_RANGE,
+        rightRange: RIGHT_RANGE,
+      }),
+    );
+    await waitFor(() => assert.equal(diffOf.mock.calls.length, 1));
+
+    const { retry } = result.current;
+    assert.ok(retry);
+    act(() => {
+      retry();
+    });
+    assert.equal(diffOf.mock.calls.length, 2);
   });
 });
