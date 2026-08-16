@@ -1,11 +1,16 @@
 import type { ViewProps } from '../App';
 import { ControlsBar } from '@components/ControlsBar';
 import { FlameGraph } from '@components/FlameGraph';
+import { Button } from '@components/core/Button';
 import { useFlamegraph } from '@hooks/useProfileData';
 import { splitQuery } from '../queryLang';
 import { navigate } from '../urlState';
 import { ComparisonPane, ErrorBanner } from './ComparisonPane';
-import { useComparisonParams, type PaneParams } from './comparisonParams';
+import {
+  swappedPaneParams,
+  useComparisonParams,
+  type PaneParams,
+} from './comparisonParams';
 
 // Kept local rather than exported from a shared module: react-refresh's
 // lint rule requires a component file's exports to be components only, so
@@ -103,6 +108,21 @@ export function ComparisonView({
         until={until}
         range={range}
       />
+      {/* Same spot in Comparison and Diff — above the panes, right-aligned —
+          so the control is where muscle memory expects it in either view.
+          Reuses Panel's small-action-button styling (Panel.css) even though
+          this row sits above a panel rather than inside one. */}
+      <div className="panel-actions" style={{ justifyContent: 'flex-end' }}>
+        <Button
+          onClick={() =>
+            navigate({
+              set: swappedPaneParams(left, right, range, from, until),
+            })
+          }
+        >
+          Swap sides
+        </Button>
+      </div>
       <div className="comparison-grid">
         <ComparisonPane
           title="Baseline"

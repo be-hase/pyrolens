@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import type { ViewProps } from '../App';
 import { ControlsBar } from '@components/ControlsBar';
 import { Panel } from '@components/Panel';
+import { Button } from '@components/core/Button';
 import { Empty } from '@components/core/Empty';
 import { profileTypeUnit } from '@api/client';
 import { FlameGraph as GrafanaFlameGraph } from '@lib/flamegraph';
@@ -12,8 +13,9 @@ import {
 import { useDiffFlamegraph } from '@hooks/useProfileData';
 import { useFlameGraphUrlState } from '@hooks/useFlameGraphUrlState';
 import { splitQuery } from '../queryLang';
+import { navigate } from '../urlState';
 import { ComparisonPane, ErrorBanner } from './ComparisonPane';
-import { useComparisonParams } from './comparisonParams';
+import { swappedPaneParams, useComparisonParams } from './comparisonParams';
 
 // Adapted from FLAMEGRAPH_EMPTY_MESSAGE (SingleView.tsx / ComparisonView.tsx):
 // a diff has two windows, so either one — not "this range" — could be why
@@ -76,6 +78,21 @@ export function DiffView({
         until={until}
         range={range}
       />
+      {/* Same spot in Comparison and Diff — above the panes, right-aligned —
+          so the control is where muscle memory expects it in either view.
+          Reuses Panel's small-action-button styling (Panel.css) even though
+          this row sits above a panel rather than inside one. */}
+      <div className="panel-actions" style={{ justifyContent: 'flex-end' }}>
+        <Button
+          onClick={() =>
+            navigate({
+              set: swappedPaneParams(left, right, range, from, until),
+            })
+          }
+        >
+          Swap sides
+        </Button>
+      </div>
       <div className="comparison-grid">
         <ComparisonPane
           title="Baseline"

@@ -273,6 +273,140 @@ test('the diff view honours a deep-linked fgSearch, instead of the uncontrolled 
   );
 });
 
+test('"Diff vs previous" on Single jumps to Diff with an abutting equal-duration baseline', async ({
+  page,
+}) => {
+  await page.goto(url('/'));
+  await clearUpstreamLog(page);
+  await page.getByRole('button', { name: 'Diff vs previous' }).click();
+
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/diff');
+  const params = new URL(page.url()).searchParams;
+  const mainSpan = meta.window.end - meta.window.start;
+  const leftFrom = Number(params.get('leftFrom'));
+  const leftUntil = Number(params.get('leftUntil'));
+  const rightFrom = Number(params.get('rightFrom'));
+  const rightUntil = Number(params.get('rightUntil'));
+
+  // Two equal-duration windows, abutting at the start of the visible range.
+  expect(leftUntil - leftFrom).toBe(mainSpan);
+  expect(rightUntil - rightFrom).toBe(mainSpan);
+  expect(leftUntil).toBe(rightFrom);
+  expect(rightFrom).toBe(meta.window.start);
+  expect(rightUntil).toBe(meta.window.end);
+  expect(params.get('leftQuery')).toBe(meta.query);
+  expect(params.get('rightQuery')).toBe(meta.query);
+
+  // The main range widens to cover both windows exactly (fixture navigates
+  // with an absolute window, so this is the absolute branch of
+  // previousPeriodParams — until stays pinned to the visible range's end,
+  // from moves back by one more span).
+  expect(Number(params.get('from'))).toBe(meta.window.start - mainSpan);
+  expect(Number(params.get('until'))).toBe(meta.window.end);
+
+  // The fixture's window is absolute, so the fake upstream's log only ever
+  // exposes the request's `left` window (see fake-pyroscope.mjs) — the Diff
+  // RPC bundles `right` alongside it without a top-level start/end the log
+  // could pick up. This still catches a baseline pane fetched against a
+  // stale or wrong window, just not independently for the right side.
+  const diffCalls = (await upstreamLog(page)).filter(
+    (entry) => entry.method === 'Diff',
+  );
+  expect(diffCalls.length).toBeGreaterThan(0);
+  for (const entry of diffCalls) {
+    expect(entry.start).toBe(leftFrom);
+    expect(entry.end).toBe(leftUntil);
+  }
+});
+
+test('"Compare vs previous" on Single jumps to Comparison with an abutting equal-duration baseline', async ({
+  page,
+}) => {
+  await page.goto(url('/'));
+  await page.getByRole('button', { name: 'Compare vs previous' }).click();
+
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/comparison');
+  const params = new URL(page.url()).searchParams;
+  const mainSpan = meta.window.end - meta.window.start;
+  const leftFrom = Number(params.get('leftFrom'));
+  const leftUntil = Number(params.get('leftUntil'));
+  const rightFrom = Number(params.get('rightFrom'));
+  const rightUntil = Number(params.get('rightUntil'));
+
+  // Two equal-duration windows, abutting at the start of the visible range.
+  expect(leftUntil - leftFrom).toBe(mainSpan);
+  expect(rightUntil - rightFrom).toBe(mainSpan);
+  expect(leftUntil).toBe(rightFrom);
+  expect(rightFrom).toBe(meta.window.start);
+  expect(rightUntil).toBe(meta.window.end);
+  expect(params.get('leftQuery')).toBe(meta.query);
+  expect(params.get('rightQuery')).toBe(meta.query);
+
+  // Same widened-main-range contract as "Diff vs previous".
+  expect(Number(params.get('from'))).toBe(meta.window.start - mainSpan);
+  expect(Number(params.get('until'))).toBe(meta.window.end);
+});
+
+test('"Diff vs previous" on a relative main range keeps the widened range relative', async ({
+  page,
+}) => {
+  // The fixture's own window (`url()`'s defaults) is absolute, so it can't
+  // exercise previousPeriodParams' relative branch — this navigates with an
+  // explicit relative from/until instead. The fake upstream replays the
+  // same fixture regardless of what range is actually requested (see
+  // e2e/README.md), so the resulting flame graph doesn't have to line up
+  // with these timestamps for the assertions below to be meaningful; only
+  // the URL params are under test here.
+  await page.goto(url('/', { from: 'now-1h', until: 'now' }));
+  await page.getByRole('button', { name: 'Diff vs previous' }).click();
+
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/diff');
+  const params = new URL(page.url()).searchParams;
+  expect(params.get('from')).toBe('now-2h');
+  expect(params.has('until')).toBe(false);
+  expect(params.get('leftFrom')).toBe('now-2h');
+  expect(params.get('leftUntil')).toBe('now-1h');
+  expect(params.get('rightFrom')).toBe('now-1h');
+  expect(params.get('rightUntil')).toBe('now');
+});
+
+// Comparison and Diff share the exact same swap control and comparisonParams
+// helper (Panel.css's .panel-actions styling, and swappedPaneParams) — run
+// the same check against both rather than trusting that they stay in sync.
+for (const path of ['/diff', '/comparison'] as const) {
+  test(`"Swap sides" on ${path} exchanges the panes' queries and bounds`, async ({
+    page,
+  }) => {
+    const leftQuery = meta.query;
+    // Distinct from leftQuery, and from the fixture's own query, so the
+    // exchange is observable rather than swapping two identical strings.
+    const rightQuery = `{service_name="${meta.service}", profile_type="${meta.profileType}", region="us-east"}`;
+
+    await page.goto(
+      url(path, {
+        leftQuery,
+        rightQuery,
+        leftFrom: meta.left.start,
+        leftUntil: meta.left.end,
+        rightFrom: meta.right.start,
+        rightUntil: meta.right.end,
+      }),
+    );
+
+    await page.getByRole('button', { name: 'Swap sides' }).click();
+
+    await expect
+      .poll(() => new URL(page.url()).searchParams.get('leftQuery'))
+      .toBe(rightQuery);
+    const params = new URL(page.url()).searchParams;
+    expect(params.get('rightQuery')).toBe(leftQuery);
+    expect(Number(params.get('leftFrom'))).toBe(meta.right.start);
+    expect(Number(params.get('leftUntil'))).toBe(meta.right.end);
+    expect(Number(params.get('rightFrom'))).toBe(meta.left.start);
+    expect(Number(params.get('rightUntil'))).toBe(meta.left.end);
+  });
+}
+
 test('the tag explorer breaks the profile down by label', async ({ page }) => {
   await page.goto(url('/explore', { groupBy: 'region' }));
 
