@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { splitQuery } from '../src/queryLang.ts';
 import {
   clearUpstreamLog,
   meta,
@@ -32,12 +33,23 @@ test('Run puts the edited query in the URL and refetches', async ({ page }) => {
   await page.getByRole('button', { name: 'Run', exact: true }).click();
 
   await expect(page).toHaveURL(/region%3D%22eu-west%22/);
+
+  // Not just that *some* request landed: a stale-query desync would replay
+  // the same fixture and pass anyway (the fake answers whatever it is sent,
+  // e2e/README.md), so this asserts the logged selector against splitQuery's
+  // normalized form of the edited query — what the API actually receives
+  // once the profile_type pseudo-label is peeled off.
+  const expectedSelector = splitQuery(edited).labelSelector;
   await expect
-    .poll(async () =>
-      (await upstreamLog(page)).some(
+    .poll(async () => {
+      const calls = (await upstreamLog(page)).filter(
         (entry) => entry.method === 'SelectMergeStacktraces',
-      ),
-    )
+      );
+      return (
+        calls.length > 0 &&
+        calls.every((entry) => entry.labelSelector === expectedSelector)
+      );
+    })
     .toBe(true);
 });
 

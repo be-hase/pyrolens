@@ -150,19 +150,26 @@ export function SingleView({
           empty={
             fg.error
               ? undefined
-              : {
-                  message: FLAMEGRAPH_EMPTY_MESSAGE,
-                  action: isLast24h(from, until)
-                    ? undefined
-                    : {
-                        label: 'Last 24 hours',
-                        // Single has no pane sub-ranges to clear (unlike
-                        // ComparisonView's identical action) — this widens
-                        // the only range there is.
-                        onClick: () =>
-                          navigate({ set: { from: 'now-24h', until: null } }),
-                      },
-                }
+              : !profileTypeID
+                ? // No usable query means no fetch was ever sent (see
+                  // useProfileData.ts), so "no profiles matched this query"
+                  // would assert a result for a query that never ran — and
+                  // "Last 24 hours" cannot fix a missing query. Same gate the
+                  // Compare/Diff actions above already use.
+                  { message: 'No query selected.' }
+                : {
+                    message: FLAMEGRAPH_EMPTY_MESSAGE,
+                    action: isLast24h(from, until)
+                      ? undefined
+                      : {
+                          label: 'Last 24 hours',
+                          // Single has no pane sub-ranges to clear (unlike
+                          // ComparisonView's identical action) — this widens
+                          // the only range there is.
+                          onClick: () =>
+                            navigate({ set: { from: 'now-24h', until: null } }),
+                        },
+                  }
           }
         />
       </Panel>

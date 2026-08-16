@@ -29,8 +29,8 @@ into a diff.
 compiles until that directory exists:
 
 ```console
-yarn build      # -> dist/
-go build ./...  # only works after the line above
+yarn build   # -> dist/
+go build .   # only works after the line above
 ```
 
 This applies to `go vet` and `go test` too, since they compile the package.
@@ -54,7 +54,8 @@ yarn test:coverage  # the same, with a report of what has no unit test
 yarn test:e2e       # playwright: the real binary against captured fixtures
 yarn build          # -> dist/
 
-go test ./...       # server tests (needs dist/, see above)
+go test .           # server tests (needs dist/, see above; not ./... —
+                     # node_modules ships real Go code the module must not walk)
 
 make build          # yarn install + yarn build + go build -o pyrolens
 make run            # build, then serve on :4041

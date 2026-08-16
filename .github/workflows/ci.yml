@@ -52,14 +52,21 @@ jobs:
           corepack enable
           yarn install --immutable
           yarn build
+      # main.go main_test.go, not `.`/`./...`: the module is one root package,
+      # but node_modules ships real Go code (flatted/golang) that yarn build
+      # just populated — walking it means a dependency's vet-failing file
+      # reds every PR and CI compiles untrusted third-party Go it never
+      # needed.
       - name: gofmt
-        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+        run: |
+          test -z "$(gofmt -l main.go main_test.go)" || \
+            (gofmt -l main.go main_test.go && exit 1)
       - name: vet
-        run: go vet ./...
+        run: go vet .
       - name: test
-        run: go test ./...
+        run: go test .
       - name: build
-        run: go build ./...
+        run: go build .
 
   # Nothing else builds the image, and its COPY list is maintained by hand: a
   # new file the build needs is only noticed here. Runs on every change rather

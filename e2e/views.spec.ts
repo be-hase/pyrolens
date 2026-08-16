@@ -452,14 +452,24 @@ test('"Diff vs previous" on Single jumps to Diff with an abutting equal-duration
   // RPC bundles `right` alongside it without a top-level start/end the log
   // could pick up. This still catches a baseline pane fetched against a
   // stale or wrong window, just not independently for the right side.
-  const diffCalls = (await upstreamLog(page)).filter(
-    (entry) => entry.method === 'Diff',
-  );
-  expect(diffCalls.length).toBeGreaterThan(0);
-  for (const entry of diffCalls) {
-    expect(entry.start).toBe(leftFrom);
-    expect(entry.end).toBe(leftUntil);
-  }
+  //
+  // Polled, not read once: the only wait above is on the URL's pathname,
+  // which flips synchronously at the click — the Diff RPC itself lands
+  // later, so reading the log once here raced it and could pass on zero
+  // calls or on a still-arriving mismatch.
+  await expect
+    .poll(async () => {
+      const diffCalls = (await upstreamLog(page)).filter(
+        (entry) => entry.method === 'Diff',
+      );
+      return (
+        diffCalls.length > 0 &&
+        diffCalls.every(
+          (entry) => entry.start === leftFrom && entry.end === leftUntil,
+        )
+      );
+    })
+    .toBe(true);
 });
 
 test('"Compare vs previous" on Single jumps to Comparison with an abutting equal-duration baseline', async ({

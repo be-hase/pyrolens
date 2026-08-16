@@ -688,23 +688,26 @@ export function TimeRangePicker({
       // auto-refresh tick that leaves the URL untouched — is gone: it could
       // not tell a tick apart from a real navigation, so it discarded a
       // paste the user had every reason to expect to land. Telling them
-      // apart is `dispatchUrl`'s job instead: it captures the URL at the
-      // moment `t v` was pressed, and the callback below only proceeds if
-      // that URL still matches when readText() settles. A tick changes
-      // nothing about the URL, so the comparison passes and the paste
-      // applies — correctly, since the range on screen has not moved. A
-      // preset click, Back/Forward, or any other real navigation changes the
-      // URL, so the comparison fails and the paste is discarded, the same
-      // protection the old listeners gave for that case but checked
-      // synchronously against the live location instead of through an event
-      // that could arrive either before or after this callback runs — no
-      // timing window either way. `triggerGeneration` is a separate capture
-      // for the *label*: a newer `t c` reporting "Copied"/"Copy failed"
-      // while this read is still in flight must not be overwritten by this
-      // paste's late "Paste failed" (see the comment on failPaste above) —
-      // captured at dispatch, before either async path below can run, since
-      // nothing else can move triggerCopyGeneration between here and
-      // readText() actually starting.
+      // apart is `stale`'s job instead: the paste is stale iff its
+      // DESTINATION state moved, i.e. the pathname or the `from`/`until`
+      // params it is about to overwrite — not the whole URL. A comparison
+      // against the whole URL treated an unrelated replace-navigation (the
+      // flame graph search's own 400ms debounce landing while readText() was
+      // in flight, say — it only touches `fgSearch`) as a real navigation and
+      // silently discarded the paste, even though the range/query/tenant
+      // never moved. Narrowing the comparison to what the paste writes fixes
+      // that while still catching every navigation that matters: a preset
+      // click, Back/Forward, or any other change to `from`/`until` still
+      // fails the comparison and discards the paste, the same protection as
+      // before for that case, checked synchronously against the live
+      // location instead of through an event that could arrive either before
+      // or after this callback runs — no timing window either way.
+      // `triggerGeneration` is a separate capture for the *label*: a newer
+      // `t c` reporting "Copied"/"Copy failed" while this read is still in
+      // flight must not be overwritten by this paste's late "Paste failed"
+      // (see the comment on failPaste above) — captured at dispatch, before
+      // either async path below can run, since nothing else can move
+      // triggerCopyGeneration between here and readText() actually starting.
       const pasteRange = () => {
         if (!navigator.clipboard?.readText) {
           // Synchronous: nothing else can have run since this call started,
@@ -715,10 +718,19 @@ export function TimeRangePicker({
         }
         const generation = ++pasteGeneration.current;
         const triggerGeneration = triggerCopyGeneration.current;
-        const dispatchUrl = window.location.pathname + window.location.search;
-        const stale = () =>
-          generation !== pasteGeneration.current ||
-          window.location.pathname + window.location.search !== dispatchUrl;
+        const dispatchPathname = window.location.pathname;
+        const dispatchParams = new URLSearchParams(window.location.search);
+        const dispatchFrom = dispatchParams.get('from');
+        const dispatchUntil = dispatchParams.get('until');
+        const stale = () => {
+          if (generation !== pasteGeneration.current) return true;
+          const params = new URLSearchParams(window.location.search);
+          return (
+            window.location.pathname !== dispatchPathname ||
+            params.get('from') !== dispatchFrom ||
+            params.get('until') !== dispatchUntil
+          );
+        };
         navigator.clipboard
           .readText()
           .then((text) => {

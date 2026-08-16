@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { UPSTREAM_PORT } from '../playwright.config.ts';
 
 /**
  * The window and query the fixtures were captured with. URLs are built from
@@ -79,12 +80,12 @@ export interface UpstreamCall {
 
 /** What the fake upstream has been asked for, through the Go proxy. */
 export async function upstreamLog(page: Page): Promise<UpstreamCall[]> {
-  const res = await page.request.get('http://127.0.0.1:4142/__log');
+  const res = await page.request.get(`http://127.0.0.1:${UPSTREAM_PORT}/__log`);
   return res.json();
 }
 
 export async function clearUpstreamLog(page: Page): Promise<void> {
-  await page.request.delete('http://127.0.0.1:4142/__log');
+  await page.request.delete(`http://127.0.0.1:${UPSTREAM_PORT}/__log`);
 }
 
 /**

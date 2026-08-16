@@ -66,18 +66,32 @@ for (const name of fixtures) {
 }
 
 // The tenancy probe reads this body with /org|tenant/i; a reworded refusal
-// would leave the UI thinking every server is single-tenant.
-let refusal = '';
+// would leave the UI thinking every server is single-tenant. Read-success is
+// tracked separately from the body's content: an empty-but-readable body
+// fails the wording check same as a reworded one, since client.ts's
+// `res.text().catch(() => '')` reads an unreadable *or* empty body the same
+// way — a Pyroscope that starts refusing with an empty 401 breaks every
+// multitenant deployment exactly as silently as one that changes the words,
+// and this is the check that exists to catch it.
+let refusal = null;
 try {
   refusal = readFileSync(`${FRESH}no-tenant.txt`, 'utf8');
 } catch {
   note('no-tenant.txt: the capture produced nothing');
 }
-if (refusal && !/org|tenant/i.test(refusal)) {
-  note(
-    `no-tenant.txt: the refusal no longer mentions an org or a tenant, so the\n` +
-      `    multitenancy probe would misread it: ${refusal.trim()}`,
-  );
+if (refusal !== null) {
+  if (refusal === '') {
+    note(
+      'no-tenant.txt: the captured refusal body is empty — client.ts reads ' +
+        'an empty body as single-tenant, so this is the exact drift this ' +
+        'canary exists to catch',
+    );
+  } else if (!/org|tenant/i.test(refusal)) {
+    note(
+      `no-tenant.txt: the refusal no longer mentions an org or a tenant, so the\n` +
+        `    multitenancy probe would misread it: ${refusal.trim()}`,
+    );
+  }
 }
 
 const meta = read(COMMITTED, 'meta.json');

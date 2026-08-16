@@ -80,8 +80,15 @@ export function navigate(opts: NavigateOptions): void {
   // A navigation that changes nothing must still fire the event — that is
   // what makes Run a real refresh for a relative range — but it must not
   // stack a history entry, or five presses of Run cost five Backs to undo
-  // and each one refetches on the way past.
-  const unchanged = url === window.location.pathname + window.location.search;
+  // and each one refetches on the way past. Comparing against the raw
+  // `location.search` is not the same test: buildUrl's URLSearchParams
+  // round trip normalises encoding (`%20` becomes `+`, param order can
+  // shift), so an externally-encoded deep link made a no-op navigation (an
+  // auto-refresh tick, say) look like a change and push a spurious history
+  // entry. Re-serializing the current URL through buildUrl the same way
+  // (`buildUrl({})`) makes both sides go through the identical
+  // normalisation, so only an actual param change trips it.
+  const unchanged = url === buildUrl({});
   if (opts.replace || unchanged) window.history.replaceState(null, '', url);
   else window.history.pushState(null, '', url);
   window.dispatchEvent(new Event(NAV_EVENT));

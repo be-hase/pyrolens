@@ -43,6 +43,10 @@ checksum:
 
 release:
   draft: false
+  # A `vX.Y.Z-rc.1` tag passes release.yml's semver gate on purpose (see its
+  # comment), so this has to mark it as such itself — otherwise an RC becomes
+  # the repo's "Latest release" on GitHub.
+  prerelease: auto
 
 # No "sort:" — GoReleaser sorts by commit subject rather than by time, which
 # scrambles the notes. Left unset, git's chronological order survives.
@@ -58,7 +62,10 @@ dockers_v2:
       - ghcr.io/be-hase/pyrolens
     tags:
       - '{{ .Version }}'
-      - latest
+      # Only for a real release: release.yml's tag gate deliberately accepts
+      # a prerelease like v1.1.0-rc.1, and without this an RC would repoint
+      # ghcr.io's latest.
+      - '{{ if not .Prerelease }}latest{{ end }}'
     platforms:
       - linux/amd64
       - linux/arm64

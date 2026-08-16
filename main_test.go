@@ -1390,3 +1390,57 @@ func TestSecurityHeadersSurviveAnUpstream1xxResponse(t *testing.T) {
 		}
 	}
 }
+
+// TestModifyResponseFiltersToAllowlistedResponseHeaders (above) proves the
+// header-direction filter works, but httputil.ReverseProxy forwards
+// resp.Trailer as its own, separate pass, after ModifyResponse and after the
+// body has already been copied — trailers never touch resp.Header at all, so
+// that filter has nothing to catch them. This drives the full handler stack
+// over a real HTTP/1.1 connection (an httptest.ResponseRecorder does not
+// model chunked trailers realistically) so a client reading the body to EOF
+// sees exactly what a browser's fetch would: both a declared trailer and one
+// the upstream never announced (net/http's TrailerPrefix mechanism), a
+// Set-Cookie among them.
+func TestModifyResponseStripsResponseTrailers(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Trailer", "X-Declared-Trailer")
+		w.WriteHeader(http.StatusOK)
+		io.WriteString(w, "body")
+		// A declared trailer, set as the docs for the Trailer response header
+		// describe.
+		w.Header().Set("X-Declared-Trailer", "declared-value")
+		// Undeclared trailers, set as net/http's TrailerPrefix docs describe —
+		// exactly how a handler streaming a late Set-Cookie would do it.
+		w.Header().Set(http.TrailerPrefix+"Set-Cookie", "sneaky=from-a-trailer")
+		w.Header().Set(http.TrailerPrefix+"X-Undeclared-Trailer", "undeclared-value")
+	}))
+	defer upstream.Close()
+	target, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dist := testDist()
+	h := newHandler(dist, []byte(indexHTML), gzipAssets(dist), newProxy(target, "", ""))
+
+	// A real listener, not httptest.NewRecorder: trailers are a wire-level
+	// concept (chunked transfer coding), and http.Client is what parses them
+	// back into resp.Trailer the way a browser's fetch layer would.
+	outer := httptest.NewServer(h)
+	defer outer.Close()
+
+	resp, err := http.Post(outer.URL+"/querier.v1.QuerierService/LabelNames", "application/json", nil)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer resp.Body.Close()
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		t.Fatalf("reading body to EOF: %v", err)
+	}
+
+	if len(resp.Trailer) != 0 {
+		t.Errorf("trailers reached the client past the allowlist: %v", resp.Trailer)
+	}
+	if v := resp.Header.Get("Trailer"); v != "" {
+		t.Errorf("Trailer announcement header reached the client: %q", v)
+	}
+}

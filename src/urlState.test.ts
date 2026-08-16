@@ -101,6 +101,18 @@ describe('navigate', () => {
     );
   });
 
+  it('treats a differently-encoded but equal URL as unchanged', () => {
+    // A deep link can arrive with %20 where URLSearchParams would emit '+'
+    // for the same value. Comparing buildUrl's re-serialization against the
+    // raw, unnormalised location.search made a no-op navigation (an
+    // auto-refresh tick, say) look like a real change and push a spurious
+    // history entry.
+    window.history.replaceState(null, '', '/?query=a%20b');
+    const before = window.history.length;
+    navigate({ set: {} });
+    assert.equal(window.history.length, before);
+  });
+
   it('announces itself so listeners outside React can react first', () => {
     // The tenant header is synced by a module-level listener on this event;
     // dropping it would let a request go out against the previous tenant.
