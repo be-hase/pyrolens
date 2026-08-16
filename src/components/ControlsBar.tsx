@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { CascadeSelect } from '@components/core/CascadeSelect';
+import { RefreshPicker } from '@components/RefreshPicker';
 import { TimeRangePicker } from '@components/TimeRangePicker';
 import { type Service, profileTypeLabel, sortProfileTypes } from '@api/client';
 import { buildQuery, parseQuery } from '../queryLang';
@@ -57,6 +58,7 @@ export function ControlsBar({
         loading={servicesLoading}
       />
       <TimeRangePicker from={from} until={until} range={range} />
+      <RefreshPicker from={from} until={until} />
     </div>
   );
 }

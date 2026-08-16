@@ -47,33 +47,55 @@ export async function checkMultitenancy(): Promise<boolean> {
 
 // --- Transport ---------------------------------------------------------------
 
+// Count of rpc() calls currently in flight (started, not yet settled).
+// Auto-refresh ticks on a fixed interval regardless of whether the fetch it
+// started last time has finished; without this, a tick that outlives its
+// interval (a large profile routinely does) gets its request aborted and
+// reissued forever, so no fetch ever completes. RefreshPicker checks this
+// before firing a tick and skips it while something it triggered is still
+// outstanding. checkMultitenancy doesn't go through rpc() and isn't counted
+// here — it runs once at startup, never on a timer.
+let inFlight = 0;
+
+/** Number of rpc() calls currently in flight. */
+export function fetchesInFlight(): number {
+  return inFlight;
+}
+
 async function rpc<T>(
   method: string,
   body: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-  if (currentTenant) headers['X-Scope-OrgID'] = currentTenant;
+  inFlight++;
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (currentTenant) headers['X-Scope-OrgID'] = currentTenant;
 
-  const res = await fetch(`${BASE}/${method}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-    signal,
-  });
-  if (!res.ok) {
-    let message = `${method} failed: HTTP ${res.status}`;
-    try {
-      const err = (await res.json()) as { message?: string };
-      if (err.message) message = err.message;
-    } catch {
-      // Non-JSON error body; keep the generic message.
+    const res = await fetch(`${BASE}/${method}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal,
+    });
+    if (!res.ok) {
+      let message = `${method} failed: HTTP ${res.status}`;
+      try {
+        const err = (await res.json()) as { message?: string };
+        if (err.message) message = err.message;
+      } catch {
+        // Non-JSON error body; keep the generic message.
+      }
+      throw new Error(message);
     }
-    throw new Error(message);
+    return (await res.json()) as T;
+  } finally {
+    // Runs on abort and rejection too, so a cancelled or failed request
+    // frees the slot just as promptly as a successful one.
+    inFlight--;
   }
-  return (await res.json()) as T;
 }
 
 // Wire shapes (connect-JSON; int64 arrives as string).

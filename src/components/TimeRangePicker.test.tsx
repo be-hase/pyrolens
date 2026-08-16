@@ -958,11 +958,65 @@ describe('TimeRangePicker', () => {
       assert.equal(params().has('until'), false);
     });
 
-    it('a stale `t v` cannot navigate once the range has already moved on', async () => {
-      // readText() can resolve after the range shown has already changed —
-      // this effect re-registers on every navigation (deps: range/from/
-      // until), which is what must invalidate a read still in flight rather
-      // than let it land and override whatever happened since.
+    it('a stale `t v` is discarded once a real navigation changes the URL', async () => {
+      // A preset click / Back / Forward changes the URL itself — the one
+      // thing pasteRange's dispatch-time URL capture treats as a real
+      // navigation, as opposed to an auto-refresh tick (see the test below),
+      // which rerenders with a fresh `range` object but leaves the URL
+      // untouched. readText() settling after this must not silently
+      // override whatever the URL moved to since.
+      at('/?from=now-1h');
+      const read = deferred<string>();
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { readText: () => read.promise },
+        configurable: true,
+        writable: true,
+      });
+
+      const { rerender } = render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      at('/?from=now-6h');
+      rerender(
+        <TimeRangePicker
+          from="now-6h"
+          until="now"
+          range={rangeOf('now-6h', 'now')}
+        />,
+      );
+
+      await act(async () => {
+        read.settle(
+          JSON.stringify({
+            from: '2026-01-02 09:05:00',
+            to: '2026-01-02 17:30:00',
+          }),
+        );
+        await read.promise;
+      });
+
+      // Untouched since the real navigation: the stale paste must not have
+      // navigated on top of it.
+      assert.equal(params().get('from'), 'now-6h');
+      assert.equal(params().has('until'), false);
+    });
+
+    it('a `t v` still navigates after an auto-refresh tick that leaves the URL unchanged', async () => {
+      // Auto-refresh calls navigate({ set: {} }) every tick: the URL stays
+      // byte-identical but the frozen "now" advances, so `range` is a new
+      // object each time — simulated here by rerendering with a fresh
+      // `rangeOf(...)` call (its values may differ from the first by a few
+      // ms, matching a real tick). Old code treated that the same as a real
+      // navigation (the keydown effect re-registered on `range`, bumping
+      // pasteGeneration in its cleanup) and silently dropped this paste even
+      // though the URL never moved. It must still land.
       at('/?from=now-1h');
       const read = deferred<string>();
       Object.defineProperty(navigator, 'clipboard', {
@@ -983,9 +1037,9 @@ describe('TimeRangePicker', () => {
 
       rerender(
         <TimeRangePicker
-          from="now-6h"
+          from="now-1h"
           until="now"
-          range={rangeOf('now-6h', 'now')}
+          range={rangeOf('now-1h', 'now')}
         />,
       );
 
@@ -999,28 +1053,36 @@ describe('TimeRangePicker', () => {
         await read.promise;
       });
 
-      // Untouched: the stale paste must not have navigated at all.
-      assert.equal(params().get('from'), 'now-1h');
-      assert.equal(params().has('until'), false);
+      assert.equal(
+        params().get('from'),
+        String(new Date(2026, 0, 2, 9, 5, 0).getTime()),
+      );
+      assert.equal(
+        params().get('until'),
+        String(new Date(2026, 0, 2, 17, 30, 0).getTime()),
+      );
     });
 
-    it('a `pyroscope:navigate` event invalidates an in-flight `t v` before any rerender', async () => {
-      // The previous test's rerender()-inside-act flushes this effect's
-      // cleanup synchronously, which would hide the actual bug: a real
-      // navigation (a preset click, Back) fires 'pyroscope:navigate' or
-      // 'popstate' and commits *before* React's passive-effect cleanup ever
-      // runs. Dispatching the event directly, with no rerender at all, is
-      // what proves pasteGeneration is bumped by the event itself rather
-      // than by this effect re-registering.
+    it('`t`, then an auto-refresh tick, then `c` still copies the range', async () => {
+      // Old code re-registered the keydown effect on every `range` change,
+      // and its cleanup unconditionally disarmed the pending `t` — a tick
+      // landing between `t` and `c` silently killed the sequence, with no
+      // feedback. Registering the effect once (reading range/from/until
+      // through a ref instead) means a tick no longer touches `tPending` at
+      // all, so the sequence the user is still typing survives it.
       at('/?from=now-1h');
-      const read = deferred<string>();
+      const calls: string[] = [];
       Object.defineProperty(navigator, 'clipboard', {
-        value: { readText: () => read.promise },
+        value: {
+          writeText: async (text: string) => {
+            calls.push(text);
+          },
+        },
         configurable: true,
         writable: true,
       });
 
-      render(
+      const { rerender } = render(
         <TimeRangePicker
           from="now-1h"
           until="now"
@@ -1028,22 +1090,22 @@ describe('TimeRangePicker', () => {
         />,
       );
       fireEvent.keyDown(window, { key: 't' });
-      fireEvent.keyDown(window, { key: 'v' });
 
-      window.dispatchEvent(new Event('pyroscope:navigate'));
+      // Simulated tick: a fresh `range` object, same from/until, URL
+      // untouched.
+      rerender(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
 
-      await act(async () => {
-        read.settle(
-          JSON.stringify({
-            from: '2026-01-02 09:05:00',
-            to: '2026-01-02 17:30:00',
-          }),
-        );
-        await read.promise;
-      });
+      fireEvent.keyDown(window, { key: 'c' });
 
-      assert.equal(params().get('from'), 'now-1h');
-      assert.equal(params().has('until'), false);
+      await screen.findByRole('button', { name: 'Copied' });
+      assert.equal(calls.length, 1);
+      assert.deepEqual(JSON.parse(calls[0]), { from: 'now-1h', to: 'now' });
     });
 
     it('shows "Paste failed" for an unparseable clipboard, without navigating', async () => {
