@@ -1,8 +1,20 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import assert from 'node:assert/strict';
-import { beforeEach, describe, it } from 'vitest';
+import { afterEach, beforeEach, describe, it } from 'vitest';
 import { TimeRangePicker } from './TimeRangePicker.tsx';
 import { resolveRange } from '../time';
+
+/** A promise this test decides when to settle — mirrors the helper in
+ * useServices.test.ts / useProfileData.test.ts. */
+function deferred<T>() {
+  let settle!: (value: T) => void;
+  let fail!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolve, reject) => {
+    settle = resolve;
+    fail = reject;
+  });
+  return { promise, settle, fail };
+}
 
 const at = (search: string) => window.history.replaceState(null, '', search);
 
@@ -173,6 +185,87 @@ describe('TimeRangePicker', () => {
     assert.equal(field('From').value, '2026-01-15 09:05:00');
   });
 
+  it('re-anchors an open draft when the URL range moves underneath it', () => {
+    // Back/Forward while the picker is open must not let a stale draft
+    // (from range A) clobber the range the URL has already moved to (B).
+    const fromA = String(new Date(2026, 0, 2, 9, 5, 0).getTime());
+    const untilA = String(new Date(2026, 0, 2, 17, 30, 0).getTime());
+    const fromB = String(new Date(2026, 0, 5, 8, 0, 0).getTime());
+    const untilB = String(new Date(2026, 0, 5, 12, 0, 0).getTime());
+
+    const { rerender } = render(
+      <TimeRangePicker
+        from={fromA}
+        until={untilA}
+        range={rangeOf(fromA, untilA)}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /:/ }));
+    assert.equal(field('From').value, '2026-01-02 09:05:00');
+    assert.equal(field('To').value, '2026-01-02 17:30:00');
+
+    rerender(
+      <TimeRangePicker
+        from={fromB}
+        until={untilB}
+        range={rangeOf(fromB, untilB)}
+      />,
+    );
+    assert.equal(field('From').value, '2026-01-05 08:00:00');
+    assert.equal(field('To').value, '2026-01-05 12:00:00');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply time range' }));
+    assert.equal(params().get('from'), fromB);
+    assert.equal(params().get('until'), untilB);
+  });
+
+  it('re-anchors an open calendar when the URL range moves underneath it', () => {
+    // Same scenario as the draft re-anchor test above, but for the popover's
+    // own month/year view: Back/Forward must not leave the calendar showing
+    // a stale month with no highlighted day.
+    const fromA = String(new Date(2026, 0, 2, 9, 5, 0).getTime());
+    const untilA = String(new Date(2026, 0, 2, 17, 30, 0).getTime());
+    const fromB = String(new Date(2026, 5, 5, 8, 0, 0).getTime());
+    const untilB = String(new Date(2026, 5, 5, 12, 0, 0).getTime());
+
+    const { rerender } = render(
+      <TimeRangePicker
+        from={fromA}
+        until={untilA}
+        range={rangeOf(fromA, untilA)}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /:/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pick from date' }));
+    const calendar = () => screen.getByRole('dialog', { name: 'Choose date' });
+    assert.ok(within(calendar()).getByText('January 2026'));
+
+    rerender(
+      <TimeRangePicker
+        from={fromB}
+        until={untilB}
+        range={rangeOf(fromB, untilB)}
+      />,
+    );
+    assert.ok(within(calendar()).getByText('June 2026'));
+  });
+
+  it('does not re-anchor the calendar to a shape-valid but impossible date', () => {
+    // Date() rolls month 13 over into next January; the calendar must not
+    // follow it there (nor render "undefined" for MONTHS[12]).
+    open(String(new Date(2026, 0, 2, 9, 5, 0).getTime()), 'now');
+    fireEvent.click(screen.getByRole('button', { name: 'Pick from date' }));
+    const calendar = () => screen.getByRole('dialog', { name: 'Choose date' });
+    assert.ok(within(calendar()).getByText('January 2026'));
+
+    fireEvent.change(field('From'), {
+      target: { value: '2026-13-01 09:00:00' },
+    });
+
+    assert.ok(within(calendar()).getByText('January 2026'));
+    assert.ok(!within(calendar()).queryByText(/undefined/));
+  });
+
   it('walks the calendar month by month', () => {
     open(String(new Date(2026, 0, 2, 9, 5, 0).getTime()), 'now');
     fireEvent.click(screen.getByRole('button', { name: 'Pick from date' }));
@@ -185,5 +278,872 @@ describe('TimeRangePicker', () => {
       within(calendar()).getByRole('button', { name: 'Next month' }),
     );
     assert.ok(within(calendar()).getByText('January 2026'));
+  });
+
+  describe('the `y` shortcut', () => {
+    it('switches a relative range to absolute', () => {
+      at('/?from=now-1h');
+      const range = rangeOf('now-1h', 'now');
+      render(<TimeRangePicker from="now-1h" until="now" range={range} />);
+
+      fireEvent.keyDown(window, { key: 'y' });
+
+      assert.equal(params().get('from'), String(range.start));
+      assert.equal(params().get('until'), String(range.end));
+    });
+
+    it('is ignored while a text field has focus', () => {
+      const trigger = open();
+      const from = field('From');
+      from.focus();
+
+      fireEvent.keyDown(from, { key: 'y' });
+
+      assert.equal(params().has('from'), false);
+      // The picker is still open and untouched — the keystroke did nothing.
+      assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+    });
+
+    it('is ignored with a modifier key held, or as a different-case key event', () => {
+      at('/?from=now-1h');
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+
+      fireEvent.keyDown(window, { key: 'Y', shiftKey: true });
+      fireEvent.keyDown(window, { key: 'y', ctrlKey: true });
+
+      // Untouched: the range must still read relative, not the absolute
+      // bounds the shortcut would have written.
+      assert.equal(params().get('from'), 'now-1h');
+      assert.equal(params().has('until'), false);
+    });
+
+    it('the `t a` sequence switches a relative range to absolute', () => {
+      at('/?from=now-1h');
+      const range = rangeOf('now-1h', 'now');
+      render(<TimeRangePicker from="now-1h" until="now" range={range} />);
+
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'a' });
+
+      assert.equal(params().get('from'), String(range.start));
+      assert.equal(params().get('until'), String(range.end));
+    });
+
+    it('an unrelated key between `t` and `a` disarms the sequence', () => {
+      at('/?from=now-1h');
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'x' });
+      fireEvent.keyDown(window, { key: 'a' });
+
+      assert.equal(params().get('from'), 'now-1h');
+      assert.equal(params().has('until'), false);
+    });
+
+    it('a second unguarded `t` re-arms the sequence instead of cancelling it', () => {
+      // Holding `t` (key-repeat) or literally retyping it should still lead
+      // into `t a` — treating it as "any other key" would swallow the
+      // sequence and require starting over.
+      at('/?from=now-1h');
+      const range = rangeOf('now-1h', 'now');
+      render(<TimeRangePicker from="now-1h" until="now" range={range} />);
+
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'a' });
+
+      assert.equal(params().get('from'), String(range.start));
+      assert.equal(params().get('until'), String(range.end));
+    });
+
+    it('`a` alone does nothing', () => {
+      at('/?from=now-1h');
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+
+      fireEvent.keyDown(window, { key: 'a' });
+
+      assert.equal(params().get('from'), 'now-1h');
+      assert.equal(params().has('until'), false);
+    });
+
+    it('a `t` pressed while a text field has focus does not arm the sequence', () => {
+      const trigger = open();
+      const from = field('From');
+      from.focus();
+
+      fireEvent.keyDown(from, { key: 't' });
+      fireEvent.keyDown(window, { key: 'a' });
+
+      assert.equal(params().has('from'), false);
+      // The picker is still open and untouched — the keystrokes did nothing.
+      assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+    });
+  });
+
+  describe('the `t c` / `t v` shortcuts', () => {
+    const originalClipboard = navigator.clipboard;
+
+    afterEach(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: originalClipboard,
+        configurable: true,
+        writable: true,
+      });
+    });
+
+    it('`t c` copies a relative range as Grafana-format JSON', async () => {
+      at('/?from=now-1h');
+      const calls: string[] = [];
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          writeText: async (text: string) => {
+            calls.push(text);
+          },
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'c' });
+
+      await screen.findByRole('button', { name: 'Copied' });
+
+      assert.equal(calls.length, 1);
+      assert.deepEqual(JSON.parse(calls[0]), { from: 'now-1h', to: 'now' });
+    });
+
+    it('`t c` copies an absolute range as ISO-8601 UTC, matching current Grafana', async () => {
+      const from = new Date(2026, 0, 2, 9, 5, 0).getTime();
+      const until = new Date(2026, 0, 2, 17, 30, 0).getTime();
+      const calls: string[] = [];
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          writeText: async (text: string) => {
+            calls.push(text);
+          },
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from={String(from)}
+          until={String(until)}
+          range={rangeOf(String(from), String(until))}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'c' });
+
+      await screen.findByRole('button', { name: 'Copied' });
+
+      assert.deepEqual(JSON.parse(calls[0]), {
+        from: new Date(from).toISOString(),
+        to: new Date(until).toISOString(),
+      });
+    });
+
+    it('`t c` formats a mixed range per endpoint, not by `from` alone', async () => {
+      // A relative `until` ("now") next to an absolute `from` — e.g. the
+      // result of pasting `{"from":"<iso>","to":"now"}` — must keep the
+      // relative side moving rather than freezing both as absolute.
+      const from = String(new Date(2026, 0, 2, 9, 5, 0).getTime());
+      const calls: string[] = [];
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          writeText: async (text: string) => {
+            calls.push(text);
+          },
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from={from}
+          until="now"
+          range={rangeOf(from, 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'c' });
+
+      await screen.findByRole('button', { name: 'Copied' });
+
+      assert.deepEqual(JSON.parse(calls[0]), {
+        from: new Date(Number(from)).toISOString(),
+        to: 'now',
+      });
+    });
+
+    it('`t v` pastes an absolute Grafana JSON range in the older local format', async () => {
+      at('/?from=now-1h');
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          readText: async () =>
+            JSON.stringify({
+              from: '2026-01-02 09:05:00',
+              to: '2026-01-02 17:30:00',
+            }),
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      assert.equal(
+        params().get('from'),
+        String(new Date(2026, 0, 2, 9, 5, 0).getTime()),
+      );
+      assert.equal(
+        params().get('until'),
+        String(new Date(2026, 0, 2, 17, 30, 0).getTime()),
+      );
+    });
+
+    it('`t v` pastes an absolute Grafana JSON range in the current ISO-8601 format', async () => {
+      const fromIso = '2026-01-02T09:05:00.000Z';
+      const toIso = '2026-01-02T17:30:00.000Z';
+      at('/?from=now-1h');
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          readText: async () => JSON.stringify({ from: fromIso, to: toIso }),
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      // Date.parse of the same ISO strings, not a hand-built local Date — the
+      // whole point of ISO is that the instant does not depend on the
+      // runner's timezone.
+      assert.equal(params().get('from'), String(Date.parse(fromIso)));
+      assert.equal(params().get('until'), String(Date.parse(toIso)));
+    });
+
+    it('rejects an ISO date that rolls over a calendar boundary, even though Date.parse would not', async () => {
+      // V8's Date.parse('...-02-30...') returns March 2 rather than NaN — an
+      // engine-dependent silent rollover `parseClipboardTimeValue` has to
+      // catch itself, the same way `parseLocalInput` already does for the
+      // local-format branch.
+      at('/?from=now-1h');
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          readText: async () =>
+            JSON.stringify({ from: '2026-02-30T00:00:00Z', to: 'now' }),
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      await screen.findByRole('button', { name: 'Paste failed' });
+      assert.equal(params().get('from'), 'now-1h');
+    });
+
+    it('accepts a real leap-day ISO date', async () => {
+      const fromIso = '2028-02-29T00:00:00Z';
+      at('/?from=now-1h');
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          readText: async () => JSON.stringify({ from: fromIso, to: 'now' }),
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      assert.equal(params().get('from'), String(Date.parse(fromIso)));
+      assert.equal(params().has('until'), false);
+    });
+
+    it('rejects an absolute value that would be misread as unix seconds by resolveTime', async () => {
+      // resolveTime() (src/time.ts) treats any URL number below 4_102_444_800
+      // as seconds, not ms. This ISO instant (January 1970) is a real date
+      // but its ms value falls under that threshold — accepting it would
+      // write a `from` that resolves to a wrong date (year ~2022) the moment
+      // the URL is read back, worse than rejecting it outright.
+      at('/?from=now-1h');
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          readText: async () =>
+            JSON.stringify({ from: '1970-01-20T00:00:00Z', to: 'now' }),
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      await screen.findByRole('button', { name: 'Paste failed' });
+      assert.equal(params().get('from'), 'now-1h');
+    });
+
+    it('`t v` pastes a relative Grafana JSON range, clearing `until` for "now"', async () => {
+      at('/?from=now-1h');
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          readText: async () => JSON.stringify({ from: 'now-6h', to: 'now' }),
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      assert.equal(params().get('from'), 'now-6h');
+      assert.equal(params().has('until'), false);
+    });
+
+    it('`t v` ignores clipboard content that does not parse as Grafana JSON', async () => {
+      // Non-JSON, JSON missing a key, and JSON with a value that fits none of
+      // the three accepted shapes — all untrusted, all a no-op.
+      at('/?from=now-1h');
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+
+      for (const bad of [
+        'not json',
+        '{}',
+        '{"from":"now-1h"}',
+        '{"from":123,"to":"now"}',
+        '{"from":"whenever","to":"now"}',
+      ]) {
+        Object.defineProperty(navigator, 'clipboard', {
+          value: { readText: async () => bad },
+          configurable: true,
+          writable: true,
+        });
+        fireEvent.keyDown(window, { key: 't' });
+        fireEvent.keyDown(window, { key: 'v' });
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+      }
+
+      assert.equal(params().get('from'), 'now-1h');
+      assert.equal(params().has('until'), false);
+    });
+
+    it('`t v` rejects hostile magnitudes rather than treating them as valid', async () => {
+      // A `now-`-prefixed value with an absurd digit count (`isRelative`'s
+      // own regex has no length cap) and a numeric string long enough to
+      // overflow a safe integer — both shape-valid to one branch of
+      // `parseClipboardTimeValue`, neither a real timestamp.
+      at('/?from=now-1h');
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+
+      for (const bad of [
+        JSON.stringify({ from: 'now-99999999999999999999h', to: 'now' }),
+        JSON.stringify({ from: '9'.repeat(300), to: 'now' }),
+      ]) {
+        Object.defineProperty(navigator, 'clipboard', {
+          value: { readText: async () => bad },
+          configurable: true,
+          writable: true,
+        });
+        fireEvent.keyDown(window, { key: 't' });
+        fireEvent.keyDown(window, { key: 'v' });
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+      }
+
+      assert.equal(params().get('from'), 'now-1h');
+      assert.equal(params().has('until'), false);
+    });
+
+    it('accepts the documented parser-boundary shapes: 0/1/3 ISO fractional digits, `+`/`-` offsets, a 7-digit relative quantity', async () => {
+      const cases: [string, () => string][] = [
+        [
+          '2026-01-02T09:05:00Z',
+          () => String(Date.parse('2026-01-02T09:05:00Z')),
+        ],
+        [
+          '2026-01-02T09:05:00.5Z',
+          () => String(Date.parse('2026-01-02T09:05:00.5Z')),
+        ],
+        [
+          '2026-01-02T09:05:00.500Z',
+          () => String(Date.parse('2026-01-02T09:05:00.500Z')),
+        ],
+        [
+          '2026-01-02T09:05:00+09:00',
+          () => String(Date.parse('2026-01-02T09:05:00+09:00')),
+        ],
+        [
+          '2026-01-02T09:05:00-05:00',
+          () => String(Date.parse('2026-01-02T09:05:00-05:00')),
+        ],
+        ['now-9999999h', () => 'now-9999999h'],
+      ];
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+
+      for (const [value, expected] of cases) {
+        at('/?from=now-1h');
+        Object.defineProperty(navigator, 'clipboard', {
+          value: {
+            readText: async () => JSON.stringify({ from: value, to: 'now' }),
+          },
+          configurable: true,
+          writable: true,
+        });
+        fireEvent.keyDown(window, { key: 't' });
+        fireEvent.keyDown(window, { key: 'v' });
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+
+        assert.equal(params().get('from'), expected(), value);
+      }
+    });
+
+    it('rejects the documented parser-boundary shapes: lowercase `z`, an 8-digit relative quantity', async () => {
+      // Lowercase `z` fails the ISO branch (the regex requires the literal
+      // capital) and also fails the local-format branch — unlike a genuinely
+      // zoneless string, it doesn't fall back to being read as local time, it
+      // is simply not a shape either branch accepts. The 8-digit relative
+      // quantity is one digit past the accepted-case above.
+      at('/?from=now-1h');
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+
+      for (const bad of [
+        JSON.stringify({ from: '2026-01-02T09:05:00z', to: 'now' }),
+        JSON.stringify({ from: 'now-99999999h', to: 'now' }),
+      ]) {
+        Object.defineProperty(navigator, 'clipboard', {
+          value: { readText: async () => bad },
+          configurable: true,
+          writable: true,
+        });
+        fireEvent.keyDown(window, { key: 't' });
+        fireEvent.keyDown(window, { key: 'v' });
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        });
+      }
+
+      assert.equal(params().get('from'), 'now-1h');
+      assert.equal(params().has('until'), false);
+    });
+
+    it('a stale `t v` cannot navigate once the range has already moved on', async () => {
+      // readText() can resolve after the range shown has already changed —
+      // this effect re-registers on every navigation (deps: range/from/
+      // until), which is what must invalidate a read still in flight rather
+      // than let it land and override whatever happened since.
+      at('/?from=now-1h');
+      const read = deferred<string>();
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { readText: () => read.promise },
+        configurable: true,
+        writable: true,
+      });
+
+      const { rerender } = render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      rerender(
+        <TimeRangePicker
+          from="now-6h"
+          until="now"
+          range={rangeOf('now-6h', 'now')}
+        />,
+      );
+
+      await act(async () => {
+        read.settle(
+          JSON.stringify({
+            from: '2026-01-02 09:05:00',
+            to: '2026-01-02 17:30:00',
+          }),
+        );
+        await read.promise;
+      });
+
+      // Untouched: the stale paste must not have navigated at all.
+      assert.equal(params().get('from'), 'now-1h');
+      assert.equal(params().has('until'), false);
+    });
+
+    it('a `pyroscope:navigate` event invalidates an in-flight `t v` before any rerender', async () => {
+      // The previous test's rerender()-inside-act flushes this effect's
+      // cleanup synchronously, which would hide the actual bug: a real
+      // navigation (a preset click, Back) fires 'pyroscope:navigate' or
+      // 'popstate' and commits *before* React's passive-effect cleanup ever
+      // runs. Dispatching the event directly, with no rerender at all, is
+      // what proves pasteGeneration is bumped by the event itself rather
+      // than by this effect re-registering.
+      at('/?from=now-1h');
+      const read = deferred<string>();
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { readText: () => read.promise },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      window.dispatchEvent(new Event('pyroscope:navigate'));
+
+      await act(async () => {
+        read.settle(
+          JSON.stringify({
+            from: '2026-01-02 09:05:00',
+            to: '2026-01-02 17:30:00',
+          }),
+        );
+        await read.promise;
+      });
+
+      assert.equal(params().get('from'), 'now-1h');
+      assert.equal(params().has('until'), false);
+    });
+
+    it('shows "Paste failed" for an unparseable clipboard, without navigating', async () => {
+      at('/?from=now-1h');
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { readText: async () => 'not json' },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      await screen.findByRole('button', { name: 'Paste failed' });
+
+      assert.equal(params().get('from'), 'now-1h');
+      assert.equal(params().has('until'), false);
+    });
+
+    it('shows "Paste failed" when the clipboard cannot be read at all (no secure context)', async () => {
+      at('/?from=now-1h');
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {},
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      await screen.findByRole('button', { name: 'Paste failed' });
+      assert.equal(params().get('from'), 'now-1h');
+    });
+
+    it('shows "Paste failed" when readText rejects (e.g. permission denied)', async () => {
+      at('/?from=now-1h');
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          readText: async () => {
+            throw new Error('denied');
+          },
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      await screen.findByRole('button', { name: 'Paste failed' });
+      assert.equal(params().get('from'), 'now-1h');
+    });
+
+    it('a stale `t v` failure cannot overwrite newer "Copied" feedback from `t c`', async () => {
+      // `t v` starts (its readText is left pending), then `t c` completes
+      // and shows "Copied" — only after that does the stale paste settle
+      // with garbage. The failure has to lose: it started first, but it
+      // resolved after a newer, truthful message already landed.
+      at('/?from=now-1h');
+      const read = deferred<string>();
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          readText: () => read.promise,
+          writeText: async () => {},
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'c' });
+      await screen.findByRole('button', { name: 'Copied' });
+
+      await act(async () => {
+        read.settle('not json');
+        await read.promise;
+      });
+
+      assert.ok(screen.getByRole('button', { name: 'Copied' }));
+      assert.equal(params().get('from'), 'now-1h');
+    });
+
+    it('a guarded `t` arms neither `t c` nor `t v`', () => {
+      const trigger = open();
+      const from = field('From');
+      from.focus();
+
+      fireEvent.keyDown(from, { key: 't' });
+      fireEvent.keyDown(window, { key: 'c' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      assert.equal(params().has('from'), false);
+      // The picker is still open and untouched — the keystrokes did nothing.
+      assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+    });
+  });
+
+  describe('copy absolute link', () => {
+    const originalClipboard = navigator.clipboard;
+
+    afterEach(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: originalClipboard,
+        configurable: true,
+        writable: true,
+      });
+    });
+
+    it('copies the resolved bounds into the URL without navigating', async () => {
+      // An unrelated param proves it is preserved rather than the URL being
+      // rebuilt from scratch, and `from=now-1h` proves this screen's own URL
+      // stays relative — only the copied text gets absolute bounds baked in.
+      at('/?from=now-1h&query=%7Bfoo%7D');
+      const calls: string[] = [];
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          writeText: async (text: string) => {
+            calls.push(text);
+          },
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      const range = rangeOf('now-1h', 'now');
+      render(<TimeRangePicker from="now-1h" until="now" range={range} />);
+      fireEvent.click(screen.getByRole('button', { name: /Last/ }));
+      fireEvent.click(
+        screen.getByRole('button', { name: 'Copy absolute link' }),
+      );
+
+      await screen.findByRole('button', { name: 'Copied' });
+
+      assert.equal(calls.length, 1);
+      const copied = new URL(calls[0]);
+      assert.equal(copied.searchParams.get('from'), String(range.start));
+      assert.equal(copied.searchParams.get('until'), String(range.end));
+      assert.equal(copied.searchParams.get('query'), '{foo}');
+      assert.match(window.location.search, /from=now-1h/);
+    });
+
+    it('a stale attempt cannot overwrite the status of the current one', async () => {
+      // Two clicks in a row: the first click's writeText is still pending
+      // when the second fires, so the first is stale by the time either
+      // settles. Settling the current (second) attempt first and the stale
+      // (first) one after — with opposite outcomes — proves the stale one
+      // is ignored rather than winning the race by resolving last.
+      at('/?from=now-1h');
+      const attempts = [deferred<void>(), deferred<void>()];
+      let call = 0;
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: () => attempts[call++].promise },
+        configurable: true,
+        writable: true,
+      });
+
+      const range = rangeOf('now-1h', 'now');
+      render(<TimeRangePicker from="now-1h" until="now" range={range} />);
+      fireEvent.click(screen.getByRole('button', { name: /Last/ }));
+      const copyButton = () =>
+        screen.getByRole('button', {
+          name: /Copy absolute link|Copied|Copy failed/,
+        });
+
+      fireEvent.click(copyButton()); // attempt 1: stale once attempt 2 fires
+      fireEvent.click(copyButton()); // attempt 2: the current one
+
+      await act(async () => {
+        attempts[1].settle();
+        await attempts[1].promise;
+      });
+      await screen.findByRole('button', { name: 'Copied' });
+
+      // jsdom has no execCommand, so a rejected writeText's fallback
+      // resolves false — a real failure for attempt 1, but attempt 1 is no
+      // longer current and must not un-copy attempt 2's result.
+      await act(async () => {
+        attempts[0].fail(new Error('denied'));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      assert.ok(screen.getByRole('button', { name: 'Copied' }));
+    });
   });
 });
