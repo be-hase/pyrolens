@@ -298,3 +298,28 @@ describe('App theme', () => {
     );
   });
 });
+
+describe('App storage guard', () => {
+  it('still renders when accessing localStorage throws (e.g. blocked storage)', async () => {
+    // Chromium's "Block all cookies" (and some locked-down/embedded
+    // contexts) make merely accessing window.localStorage throw
+    // SecurityError, not just getItem/setItem. App reads it from a
+    // useState initializer on its very first render, above the only
+    // ErrorBoundary in the tree, so an unguarded access there used to
+    // white-screen the whole app instead of just losing the remembered
+    // theme/tenant.
+    const original = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new Error('blocked');
+      },
+    });
+    try {
+      render(<App />);
+      await waitFor(() => assert.ok(screen.getByRole('navigation')));
+    } finally {
+      if (original) Object.defineProperty(window, 'localStorage', original);
+    }
+  });
+});

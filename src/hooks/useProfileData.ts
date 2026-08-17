@@ -169,7 +169,15 @@ export function useDiffFlamegraph({
   const left = splitQuery(leftQuery);
   const right = splitQuery(rightQuery);
 
-  const active = !!left.profileTypeID && !!right.profileTypeID;
+  // The upstream Diff RPC assumes both sides sample the same profile type
+  // (e.g. both cpu, or both alloc) and returns a differential flame graph
+  // built as if that were true even when it isn't — a mismatched pair must
+  // never reach fetchDiffFlamegraph at all, not just be flagged after the
+  // fact. DiffView renders a contextual message for this case instead.
+  const active =
+    !!left.profileTypeID &&
+    !!right.profileTypeID &&
+    left.profileTypeID === right.profileTypeID;
   const { data, fetching, fetchError, retry } =
     useFetched<DiffFlamegraphData | null>(
       null,

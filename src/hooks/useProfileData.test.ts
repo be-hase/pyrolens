@@ -24,6 +24,7 @@ const timelineOf = vi.mocked(fetchTimeline);
 const diffOf = vi.mocked(fetchDiffFlamegraph);
 
 const CPU = 'process_cpu:cpu:nanoseconds:cpu:nanoseconds';
+const ALLOC = 'memory:alloc_objects:count:space:bytes';
 const QUERY = `{service_name="web", profile_type="${CPU}"}`;
 const OTHER = `{service_name="api", profile_type="${CPU}"}`;
 const RANGE = { start: 1_000_000, end: 4_600_000 };
@@ -390,6 +391,23 @@ describe('useDiffFlamegraph', () => {
     await waitFor(() =>
       assert.deepEqual(result.current.diff?.names, ['total']),
     );
+  });
+
+  it('does not fetch when the panes name different profile types', () => {
+    // Pyroscope's Diff RPC assumes both sides sample the same profile
+    // type; sending mismatched IDs (e.g. cpu vs. alloc) upstream produces
+    // a differential flame graph between incomparable measurements. The
+    // pair must never reach fetchDiffFlamegraph at all.
+    const { result } = renderHook(() =>
+      useDiffFlamegraph({
+        leftQuery: QUERY,
+        rightQuery: `{service_name="api", profile_type="${ALLOC}"}`,
+        leftRange: LEFT_RANGE,
+        rightRange: RIGHT_RANGE,
+      }),
+    );
+    assert.equal(result.current.loading, false);
+    assert.equal(diffOf.mock.calls.length, 0);
   });
 
   it('refetches when maxNodes changes, and sends it through', async () => {

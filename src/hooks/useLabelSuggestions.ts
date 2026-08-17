@@ -206,9 +206,23 @@ export function useLabelSuggestions({
     return () => controller.abort();
   }, [wantNames, debStart, debEnd, tenantID, namesKey]);
 
+  // Same commit-vs-passive-cleanup race as the names path above (see that
+  // comment for the mechanism): a stale response can land after the pool
+  // key has already moved on. Unlike names, this effect always re-fetches
+  // on the next key, so a stale landing is normally overwritten — except
+  // when the replacement fetch rejects, in which case nothing else would
+  // ever overwrite it. `valuesKey` also folds in the label, since a value
+  // pool belongs to one label as well as one range/tenant.
+  const valuesKey = `${debStart}:${debEnd}:${tenantID ?? ''}:${debLabel}`;
+  const valuesKeyRef = useRef(valuesKey);
+  useLayoutEffect(() => {
+    valuesKeyRef.current = valuesKey;
+  });
+
   useEffect(() => {
     if (!debLabel) return;
     const controller = new AbortController();
+    const requestKey = valuesKey;
     // The pseudo-label is queried under its server-side name, or the values
     // of `profile_type` come back empty.
     fetchLabelValues(
@@ -219,11 +233,13 @@ export function useLabelSuggestions({
       controller.signal,
     )
       .then((vs) => {
-        if (!controller.signal.aborted) setValues(vs);
+        if (controller.signal.aborted) return;
+        if (valuesKeyRef.current !== requestKey) return;
+        setValues(vs);
       })
       .catch(() => {});
     return () => controller.abort();
-  }, [debLabel, debStart, debEnd, tenantID]);
+  }, [debLabel, debStart, debEnd, tenantID, valuesKey]);
 
   // Memoized: the query bar re-renders on every caret move and every mouse
   // move over the popup, and a fuzzy pass over a high-cardinality value pool

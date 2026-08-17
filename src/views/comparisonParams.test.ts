@@ -1,6 +1,7 @@
 import { renderHook } from '@testing-library/react';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it } from 'vitest';
+import { resolveTime } from '../time.ts';
 import {
   previousPeriodParams,
   swappedPaneParams,
@@ -158,6 +159,135 @@ describe('previousPeriodParams', () => {
       const params = previousPeriodParams(MAIN_QUERY, 'now-30m', '', RANGE);
       assert.equal(params.until, null);
       assert.equal(params.rightUntil, 'now');
+    });
+
+    it('doubles in the same unit even when a larger unit would also divide evenly (regression)', () => {
+      // 90m doubles to 180m, which is also an exact 3h — the until==='now'
+      // path must keep same-unit doubling, not switch to the largest-exact-
+      // unit expression the offset-end path below uses.
+      const params = previousPeriodParams(MAIN_QUERY, 'now-90m', 'now', RANGE);
+      assert.equal(params.from, 'now-180m');
+      assert.equal(params.leftFrom, 'now-180m');
+    });
+  });
+
+  describe('relative source range with a moving (non-"now") until', () => {
+    // A fixed stand-in for the wall clock, distinct from RANGE/START/END so
+    // resolving pane params against it can't accidentally line up with the
+    // main-frame numbers by coincidence.
+    const REAL_NOW = 2_000_000_000_000;
+
+    // Resolves returned params the way the app does: `until` (main-frame,
+    // wall-clock-relative) anchors mainRange.end, and the pane bounds then
+    // resolve against *that*, not REAL_NOW directly — mirroring
+    // useComparisonParams's `pane()` helper.
+    const resolvePanes = (params: Record<string, string | null>) => {
+      const mainRangeEnd = resolveTime(params.until, NaN, REAL_NOW);
+      return {
+        left: {
+          start: resolveTime(params.leftFrom, NaN, mainRangeEnd),
+          end: resolveTime(params.leftUntil, NaN, mainRangeEnd),
+        },
+        right: {
+          start: resolveTime(params.rightFrom, NaN, mainRangeEnd),
+          end: resolveTime(params.rightUntil, NaN, mainRangeEnd),
+        },
+      };
+    };
+
+    it('widens the window and keeps every bound relative for an hour/minutes pair', () => {
+      // from=now-1h, until=now-5m (span 55m): main widens to now-115m..now-5m,
+      // left (baseline) is the earlier 55m, right (comparison) is the later
+      // 55m abutting at the original `from`.
+      const params = previousPeriodParams(
+        MAIN_QUERY,
+        'now-1h',
+        'now-5m',
+        RANGE,
+      );
+      assert.deepEqual(params, {
+        from: 'now-115m',
+        until: 'now-5m',
+        leftQuery: MAIN_QUERY,
+        rightQuery: MAIN_QUERY,
+        // Pane bounds resolve against mainRange.end (already now-5m in real
+        // time), not the wall clock — so they're expressed span-anchored
+        // (110m/55m from that anchor), not by reusing the main-frame
+        // strings, or the until-offset would apply twice.
+        leftFrom: 'now-110m',
+        leftUntil: 'now-55m',
+        rightFrom: 'now-55m',
+        rightUntil: 'now',
+      });
+
+      // The resolved state is what actually matters: right (comparison)
+      // must equal the true original range, left (baseline) the equal-span
+      // period immediately before it.
+      const { left, right } = resolvePanes(params);
+      assert.deepEqual(right, {
+        start: REAL_NOW - 3_600_000,
+        end: REAL_NOW - 300_000,
+      });
+      assert.deepEqual(left, {
+        start: REAL_NOW - 6_900_000,
+        end: REAL_NOW - 3_600_000,
+      });
+    });
+
+    it('expresses a mixed-unit pair exactly, in the largest unit that divides evenly', () => {
+      // from=now-100s, until=now-1m (span 40s): widened from-offset is 140s,
+      // which isn't a whole number of minutes, so it stays in seconds.
+      const params = previousPeriodParams(
+        MAIN_QUERY,
+        'now-100s',
+        'now-1m',
+        RANGE,
+      );
+      assert.deepEqual(params, {
+        from: 'now-140s',
+        until: 'now-1m',
+        leftQuery: MAIN_QUERY,
+        rightQuery: MAIN_QUERY,
+        leftFrom: 'now-80s',
+        leftUntil: 'now-40s',
+        rightFrom: 'now-40s',
+        rightUntil: 'now',
+      });
+
+      const { left, right } = resolvePanes(params);
+      assert.deepEqual(right, {
+        start: REAL_NOW - 100_000,
+        end: REAL_NOW - 60_000,
+      });
+      assert.deepEqual(left, {
+        start: REAL_NOW - 140_000,
+        end: REAL_NOW - 100_000,
+      });
+    });
+
+    it('falls back to the absolute branch for an inverted relative pair', () => {
+      // until (now-1h, 60m ago) is chronologically *before* from (now-1m,
+      // 1m ago) — a degenerate/inverted pair. This must not produce a
+      // nonsense relative range; it falls through to the same absolute-range
+      // formula the non-relative branch below uses, ignoring the (garbage)
+      // relative strings entirely, exactly like an inverted absolute pair
+      // would since that branch only ever reads `range`.
+      const params = previousPeriodParams(
+        MAIN_QUERY,
+        'now-1m',
+        'now-1h',
+        RANGE,
+      );
+      assert.deepEqual(params, {
+        from: String(START - SPAN),
+        until: String(END),
+        leftQuery: MAIN_QUERY,
+        rightQuery: MAIN_QUERY,
+        leftFrom: String(START - SPAN),
+        leftUntil: String(START),
+        rightFrom: String(START),
+        rightUntil: String(END),
+      });
     });
   });
 });
@@ -407,6 +537,29 @@ describe('swappedPaneParams', () => {
       });
     });
 
+    it('prefers a relative form for the completed default bound when the main range ends at an offset, not just "now"', () => {
+      // Same shape as the 'now'-ending case above, but mainUntil is
+      // "now-5m" — a moving relative range, not just the "now" spelling.
+      // Panes anchor their own "now" to mainRange.end regardless of what
+      // the main range's raw `until` string says, so the completed bound
+      // must come out identical to the plain-"now" case.
+      const x = START + 300_000;
+      at(`/comparison?leftFrom=${x}`);
+      const { left, right } = panes();
+
+      assert.deepEqual(
+        swappedPaneParams(left, right, RANGE, 'now-1h', 'now-5m'),
+        {
+          leftQuery: null,
+          rightQuery: null,
+          leftFrom: 'now-1800s',
+          leftUntil: 'now',
+          rightFrom: String(x),
+          rightUntil: 'now-1800s',
+        },
+      );
+    });
+
     it('falls back to absolute for the completed bound when the relative default is not evenly expressible', () => {
       // Same shape as the relative case above, but the main span has a
       // sub-second remainder that "now-Ns" cannot express exactly.
@@ -495,6 +648,26 @@ describe('swappedPaneParams', () => {
       const params = swappedPaneParams(left, right, RANGE, 'now-1h', '');
       assert.equal(params.leftFrom, 'now-1800s');
       assert.equal(params.rightUntil, 'now-1800s');
+    });
+
+    it('slides to relative halves when the main range ends at an offset, not just "now"', () => {
+      // mainUntil is "now-5m" — a moving relative range that isn't the
+      // literal "now" spelling. This used to fall through to Case 3 (both
+      // panes at defaults, absolute fallback) and freeze the swap, because
+      // the gate only recognized until==='now'/absent as relative.
+      at('/comparison');
+      const { left, right } = panes();
+      assert.deepEqual(
+        swappedPaneParams(left, right, RANGE, 'now-1h', 'now-5m'),
+        {
+          leftQuery: null,
+          rightQuery: null,
+          leftFrom: 'now-1800s',
+          leftUntil: 'now',
+          rightFrom: 'now-3600s',
+          rightUntil: 'now-1800s',
+        },
+      );
     });
 
     it('swapping twice from relative defaults returns to the default-equivalent relative params', () => {

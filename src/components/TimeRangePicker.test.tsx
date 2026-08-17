@@ -150,6 +150,15 @@ describe('TimeRangePicker', () => {
     }
   });
 
+  it('refuses a sub-100 year instead of silently landing in the 1900s', () => {
+    // The multi-arg Date constructor maps years 0-99 to 1900-1999, so
+    // "0099" would otherwise parse as 1999 and pass every other faithfulness
+    // check — a 1900-year jump the input never asked for, applied silently.
+    open();
+    fireEvent.change(field('From'), { target: { value: '0099-01-02 09:00' } });
+    assert.equal(field('From').getAttribute('aria-invalid'), 'true');
+  });
+
   it('refuses an end that is not after the start', () => {
     open();
     fireEvent.change(field('From'), {
@@ -757,6 +766,69 @@ describe('TimeRangePicker', () => {
       assert.equal(params().get('from'), 'now-1h');
     });
 
+    it('rejects a sub-100-year ISO clipboard value instead of landing in the 1900s', async () => {
+      // Same 0-99 -> 1900-1999 mapping risk as the local-format branch (see
+      // parseLocalInput's own test), but here Date.UTC's round trip already
+      // compares against the ORIGINAL parsed year, not the mapped one, so a
+      // mismatch (1999 !== 99) already rejects this on its own.
+      at('/?from=now-1h');
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          readText: async () =>
+            JSON.stringify({ from: '0099-01-02T09:00:00Z', to: 'now' }),
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      await screen.findByRole('button', { name: 'Paste failed' });
+      assert.equal(params().get('from'), 'now-1h');
+    });
+
+    it('rejects a sub-100-year local-format clipboard value instead of landing in the 1900s', async () => {
+      // Pins the clipboard path into `parseLocalInput` itself (reached via
+      // parseClipboardTimeValue's fallback branch), rather than the ISO
+      // branch above: unlike ISO's Date.UTC round trip, which already
+      // rejected a sub-100 year before this round's fix, this is the branch
+      // the round actually fixed, and it had no clipboard-path pin.
+      at('/?from=now-1h');
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          readText: async () =>
+            JSON.stringify({
+              from: '0099-01-02 09:00:00',
+              to: '0099-01-02 10:00:00',
+            }),
+        },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      await screen.findByRole('button', { name: 'Paste failed' });
+      assert.equal(params().get('from'), 'now-1h');
+      assert.equal(params().has('until'), false);
+    });
+
     it('accepts a real leap-day ISO date', async () => {
       // Must stay in the past relative to the "now" that `to: 'now'` below
       // resolves against, or the from>=to ordering check (see the reversed-
@@ -1224,6 +1296,228 @@ describe('TimeRangePicker', () => {
       // Simulates the fgSearch debounce's own replace-navigation landing
       // before this paste's clipboard read has settled.
       at('/?from=now-1h&fgSearch=alloc');
+
+      await act(async () => {
+        read.settle(
+          JSON.stringify({
+            from: '2026-01-02 09:05:00',
+            to: '2026-01-02 17:30:00',
+          }),
+        );
+        await read.promise;
+      });
+
+      assert.equal(
+        params().get('from'),
+        String(new Date(2026, 0, 2, 9, 5, 0).getTime()),
+      );
+      assert.equal(
+        params().get('until'),
+        String(new Date(2026, 0, 2, 17, 30, 0).getTime()),
+      );
+    });
+
+    it('a stale `t v` is discarded once a real navigation changes only the tenant', async () => {
+      // Neither `tenant` nor `query` touches `from`/`until`, so the old
+      // narrowed comparison (pathname + from/until only) missed this: the
+      // clipboard read resolves after the user has switched tenant, and the
+      // range meant for the old tenant's screen lands on the new one — an
+      // async action started in one context landing in another.
+      at('/?from=now-1h&tenant=acme');
+      const read = deferred<string>();
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { readText: () => read.promise },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      at('/?from=now-1h&tenant=other');
+
+      await act(async () => {
+        read.settle(
+          JSON.stringify({
+            from: '2026-01-02 09:05:00',
+            to: '2026-01-02 17:30:00',
+          }),
+        );
+        await read.promise;
+      });
+
+      // Untouched: the paste captured at the "acme" tenant must not land on
+      // the "other" tenant's screen.
+      assert.equal(params().get('from'), 'now-1h');
+      assert.equal(params().has('until'), false);
+    });
+
+    it('a stale `t v` is discarded once a real navigation changes only the query', async () => {
+      // Same as the tenant case above, but for the query bar: editing the
+      // query also leaves from/until untouched, so it was equally invisible
+      // to the old narrowed comparison.
+      at('/?from=now-1h&query=%7Ba%3D%22b%22%7D');
+      const read = deferred<string>();
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { readText: () => read.promise },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      at('/?from=now-1h&query=%7Ba%3D%22c%22%7D');
+
+      await act(async () => {
+        read.settle(
+          JSON.stringify({
+            from: '2026-01-02 09:05:00',
+            to: '2026-01-02 17:30:00',
+          }),
+        );
+        await read.promise;
+      });
+
+      assert.equal(params().get('from'), 'now-1h');
+      assert.equal(params().has('until'), false);
+    });
+
+    it('a `t v` still navigates after App fills in a default query mid-read', async () => {
+      // App writes a default `query` (a background replace) when the URL
+      // arrives with none, e.g. after the services fetch settles. A `t v`
+      // dispatched before that write captures `query=null`; the write
+      // landing while readText() is still pending must not read as a
+      // context switch the way an actual query edit (null was never
+      // involved) does above — absence means "pending materialization", not
+      // "a screen the user left".
+      at('/?from=now-1h');
+      const read = deferred<string>();
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { readText: () => read.promise },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      // App's own background default-query fill, landing mid-read.
+      at('/?from=now-1h&query=%7Ba%3D%22b%22%7D');
+
+      await act(async () => {
+        read.settle(
+          JSON.stringify({
+            from: '2026-01-02 09:05:00',
+            to: '2026-01-02 17:30:00',
+          }),
+        );
+        await read.promise;
+      });
+
+      assert.equal(
+        params().get('from'),
+        String(new Date(2026, 0, 2, 9, 5, 0).getTime()),
+      );
+      assert.equal(
+        params().get('until'),
+        String(new Date(2026, 0, 2, 17, 30, 0).getTime()),
+      );
+    });
+
+    it('a `t v` still navigates after App adopts a stored tenant mid-read', async () => {
+      // App replace-writes `tenant` from null to a remembered value on
+      // stored-tenant adoption. A `t v` dispatched before that lands must
+      // not treat the null->value transition as the user having switched
+      // tenant (that case, a real non-null->different-non-null change, is
+      // covered above and still discards).
+      at('/?from=now-1h');
+      const read = deferred<string>();
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { readText: () => read.promise },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      // App's own background stored-tenant adoption, landing mid-read.
+      at('/?from=now-1h&tenant=acme');
+
+      await act(async () => {
+        read.settle(
+          JSON.stringify({
+            from: '2026-01-02 09:05:00',
+            to: '2026-01-02 17:30:00',
+          }),
+        );
+        await read.promise;
+      });
+
+      assert.equal(
+        params().get('from'),
+        String(new Date(2026, 0, 2, 9, 5, 0).getTime()),
+      );
+      assert.equal(
+        params().get('until'),
+        String(new Date(2026, 0, 2, 17, 30, 0).getTime()),
+      );
+    });
+
+    it('a `t v` still navigates after App strips a single tenant mid-read', async () => {
+      // The reverse of the adoption case: a value->null strip (App's
+      // single-tenant handling) is also background traffic, not a context
+      // switch, so it must not discard a paste dispatched while the tenant
+      // param still held its old value.
+      at('/?from=now-1h&tenant=acme');
+      const read = deferred<string>();
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { readText: () => read.promise },
+        configurable: true,
+        writable: true,
+      });
+
+      render(
+        <TimeRangePicker
+          from="now-1h"
+          until="now"
+          range={rangeOf('now-1h', 'now')}
+        />,
+      );
+      fireEvent.keyDown(window, { key: 't' });
+      fireEvent.keyDown(window, { key: 'v' });
+
+      // App's own background single-tenant strip, landing mid-read.
+      at('/?from=now-1h');
 
       await act(async () => {
         read.settle(

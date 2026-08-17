@@ -58,8 +58,12 @@ function parseLocalInput(value: string): number {
     Number(mi),
     Number(s ?? 0),
   );
-  // Reject rollovers like month 13, 25:00, or :99 that Date() accepts.
+  // Reject rollovers like month 13, 25:00, or :99 that Date() accepts, and a
+  // year 0-99 that the multi-argument Date constructor maps to 1900-1999
+  // instead of rejecting — "0099-01-02" would otherwise silently become
+  // 1999-01-02, passing every other faithfulness check below.
   const faithful =
+    date.getFullYear() === Number(y) &&
     date.getMonth() === Number(mo) - 1 &&
     date.getHours() === Number(h) &&
     date.getMinutes() === Number(mi) &&
@@ -721,25 +725,60 @@ export function TimeRangePicker({
       // not tell a tick apart from a real navigation, so it discarded a
       // paste the user had every reason to expect to land. Telling them
       // apart is `stale`'s job instead: the paste is stale iff its
-      // DESTINATION state moved, i.e. the pathname or the `from`/`until`
-      // params it is about to overwrite — not the whole URL. A comparison
-      // against the whole URL treated an unrelated replace-navigation (the
-      // flame graph search's own 400ms debounce landing while readText() was
-      // in flight, say — it only touches `fgSearch`) as a real navigation and
-      // silently discarded the paste, even though the range/query/tenant
-      // never moved. Narrowing the comparison to what the paste writes fixes
-      // that while still catching every navigation that matters: a preset
-      // click, Back/Forward, or any other change to `from`/`until` still
-      // fails the comparison and discards the paste, the same protection as
-      // before for that case, checked synchronously against the live
-      // location instead of through an event that could arrive either before
-      // or after this callback runs — no timing window either way.
+      // DESTINATION moved — the `from`/`until` params it is about to
+      // overwrite, PLUS the data context (`tenant`, `query`, `leftQuery`,
+      // `rightQuery`) it is about to land in, since neither of those touches
+      // from/until but both change what screen the pasted range would apply
+      // to — not the whole URL. A comparison against the whole URL treated
+      // an unrelated replace-navigation (the flame graph search's own 400ms
+      // debounce landing while readText() was in flight, say — it only
+      // touches `fgSearch`) as a real navigation and silently discarded the
+      // paste, even though the range/query/tenant never moved. Narrowing the
+      // comparison to what the paste writes and where it lands fixes that
+      // while still catching every navigation that matters: a preset click,
+      // Back/Forward, a tenant switch, a query edit, or any other change to
+      // one of those params still fails the comparison and discards the
+      // paste, checked synchronously against the live location instead of
+      // through an event that could arrive either before or after this
+      // callback runs — no timing window either way. Deliberately excluded:
+      // self-debounced/background writers like `fgSearch` and `fgSandwich`
+      // (that was the bug the whole-URL comparison caused), and a param a
+      // background replace can write without user intent (groupBy's default
+      // write) — including those would reintroduce the exact false-positive
+      // staleness this comparison was narrowed to fix.
       // `triggerGeneration` is a separate capture for the *label*: a newer
       // `t c` reporting "Copied"/"Copy failed" while this read is still in
       // flight must not be overwritten by this paste's late "Paste failed"
       // (see the comment on failPaste above) — captured at dispatch, before
       // either async path below can run, since nothing else can move
       // triggerCopyGeneration between here and readText() actually starting.
+      //
+      // The context params (tenant/query/leftQuery/rightQuery) count as
+      // moved only when BOTH the captured and the current value are
+      // non-null AND they differ — a null on either side is excluded. App
+      // itself replace-writes these: filling in a default `query` when the
+      // URL has none, adopting a remembered tenant (null -> value), and
+      // stripping a single tenant back to null (value -> null). A `t v`
+      // dispatched before one of those lands (a deep link, or the clipboard
+      // read still pending behind a permission prompt) would otherwise be
+      // discarded by exactly the kind of background write this whole check
+      // exists to let through — the flame graph search's own debounce is
+      // the same class of problem, just on a different param. Not every
+      // null transition is background traffic: Swap sides, Diff's
+      // "Match Comparison to Baseline" and a pane query cleared to '' all
+      // move an override into or out of absence by user action. Those still
+      // land the paste, and that is safe rather than accidental: the paste
+      // writes only the main `from`/`until`, which none of those actions
+      // touch, so landing cannot contradict what the user just did — while
+      // treating them as stale would silently swallow the paste, the
+      // worse failure. The switches that would make a landed range mean
+      // something else — an actual tenant change, an actual query edit —
+      // are always non-null -> a *different* non-null, and still discard.
+      // `from`/`until` themselves stay compared exactly as before — any
+      // change, including a null transition, discards there, because
+      // unlike tenant/query they ARE the paste's destination.
+      const contextMoved = (dispatch: string | null, current: string | null) =>
+        dispatch !== null && current !== null && dispatch !== current;
       const pasteRange = () => {
         if (!navigator.clipboard?.readText) {
           // Synchronous: nothing else can have run since this call started,
@@ -754,13 +793,21 @@ export function TimeRangePicker({
         const dispatchParams = new URLSearchParams(window.location.search);
         const dispatchFrom = dispatchParams.get('from');
         const dispatchUntil = dispatchParams.get('until');
+        const dispatchTenant = dispatchParams.get('tenant');
+        const dispatchQuery = dispatchParams.get('query');
+        const dispatchLeftQuery = dispatchParams.get('leftQuery');
+        const dispatchRightQuery = dispatchParams.get('rightQuery');
         const stale = () => {
           if (generation !== pasteGeneration.current) return true;
           const params = new URLSearchParams(window.location.search);
           return (
             window.location.pathname !== dispatchPathname ||
             params.get('from') !== dispatchFrom ||
-            params.get('until') !== dispatchUntil
+            params.get('until') !== dispatchUntil ||
+            contextMoved(dispatchTenant, params.get('tenant')) ||
+            contextMoved(dispatchQuery, params.get('query')) ||
+            contextMoved(dispatchLeftQuery, params.get('leftQuery')) ||
+            contextMoved(dispatchRightQuery, params.get('rightQuery'))
           );
         };
         navigator.clipboard

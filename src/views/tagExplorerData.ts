@@ -9,7 +9,11 @@ import {
   toDisplayValue,
   yAxisFormatter,
 } from '@components/timeseries-utils';
-import { isInternalLabel, toDisplayLabel } from '../queryLang';
+import {
+  isInternalLabel,
+  isValidLabelName,
+  toDisplayLabel,
+} from '../queryLang';
 
 export interface TagRow {
   label: string;
@@ -71,12 +75,20 @@ export function sortRows(rows: TagRow[], key: SortKey): TagRow[] {
 /** The labels offered as a grouping, in display form. */
 export function groupByLabels(names: string[]): string[] {
   // profile_type and service_name are already pinned by the query itself, so
-  // grouping by them is never useful.
+  // grouping by them is never useful. Validated, not just filtered — the
+  // same reasoning as useLabelSuggestions.ts's names filter: a name outside
+  // [a-zA-Z_][a-zA-Z0-9_]* makes it into a Group-by button and a groupBy URL
+  // param, and upsertMatcher then silently refuses it and returns the query
+  // unchanged, so "select"/"compare" navigate without the matcher ever being
+  // added instead of failing loudly.
   return names
     .map(toDisplayLabel)
     .filter(
       (n) =>
-        !isInternalLabel(n) && n !== 'service_name' && n !== 'profile_type',
+        !isInternalLabel(n) &&
+        isValidLabelName(n) &&
+        n !== 'service_name' &&
+        n !== 'profile_type',
     )
     .sort();
 }

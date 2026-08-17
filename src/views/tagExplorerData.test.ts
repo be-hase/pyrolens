@@ -209,6 +209,13 @@ describe('groupByLabels', () => {
     assert.deepEqual(groupByLabels([]), []);
     assert.deepEqual(groupByLabels(['service_name', '__profile_type__']), []);
   });
+
+  it('drops a syntactically invalid label name', () => {
+    // upsertMatcher silently no-ops on a name outside
+    // [a-zA-Z_][a-zA-Z0-9_]*, so offering one as a Group-by button would
+    // produce a "select"/"compare" that never actually adds the matcher.
+    assert.deepEqual(groupByLabels(['region', 'bad-label.name']), ['region']);
+  });
 });
 
 describe('formatCell', () => {

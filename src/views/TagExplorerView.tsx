@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ViewProps } from '../App';
 import { ControlsBar } from '@components/ControlsBar';
 import { MultiTimeSeries, type NamedSeries } from '@components/MultiTimeSeries';
@@ -83,11 +83,68 @@ export function TagExplorerView({
     [labelSelector, range.start, range.end, tenantID],
   );
 
-  // Pick a default grouping label once labels arrive.
+  // Pick a default grouping label once labels arrive, and also fall back to
+  // one when the current groupBy is not among them — a query switch (or a
+  // deep link) can leave a label named that the new query's series simply
+  // don't have, and nothing else in this view ever notices: the fetch below
+  // keeps requesting that label forever, painting an empty breakdown while
+  // no chip reads as selected.
+  //
+  // This must not act while `labels.fetching` — useFetched's own contract
+  // (see its header) is stale-while-refetching: `labels.data` can still be
+  // holding the *previous* query's list for one or more renders after
+  // `groupBy` has already moved on, because its own effect hasn't committed
+  // the new key's result yet. Resetting against that in-flight list would
+  // read a groupBy the new query actually has as "missing" and clobber it
+  // before the correct list ever arrives.
+  //
+  // Nor may a *settled* list missing groupBy always reset: for a relative
+  // range "now" advances on every navigation and every auto-refresh tick
+  // (see AGENTS.md), and this fetch is keyed on range.start/range.end, so it
+  // refires continuously under the same query — not only on a query switch.
+  // If one of those background refetches returns a momentarily partial (or
+  // differently ordered) list that happens to lack the user's selection,
+  // that is a transient flap, not evidence the label is invalid; the pane
+  // showing an empty breakdown until the next tick corrects it is fine, but
+  // replace-navigating the user's explicit choice away is not — it silently
+  // destroys URL state the user chose, and Back cannot undo a replace.
+  //
+  // So `confirmedRef` remembers the last (labelSelector, tenant, groupBy)
+  // triple a settled list actually contained. A reset only fires when the
+  // *current* query+tenant+groupBy was never confirmed — covering a fresh
+  // deep link (never confirmed at all), a real query switch (confirmed under
+  // the old selector, not this one), and a tenant switch (confirmed under
+  // the old tenant, not this one — the labels fetch is keyed on tenantID
+  // too, and a groupBy valid under one tenant need not exist under another)
+  // — while a flap under the same confirmed query and tenant leaves the
+  // selection alone.
+  const confirmedRef = useRef<{
+    selector: string;
+    tenant: string;
+    groupBy: string;
+  } | null>(null);
   useEffect(() => {
-    if (groupBy || labels.data.length === 0) return;
+    if (labels.fetching) return;
+    if (labels.data.length === 0) return;
+    if (groupBy && labels.data.includes(groupBy)) {
+      confirmedRef.current = {
+        selector: labelSelector,
+        tenant: tenantID ?? '',
+        groupBy,
+      };
+      return;
+    }
+    const confirmed = confirmedRef.current;
+    if (
+      confirmed &&
+      confirmed.selector === labelSelector &&
+      confirmed.tenant === (tenantID ?? '') &&
+      confirmed.groupBy === groupBy
+    ) {
+      return;
+    }
     navigate({ set: { groupBy: labels.data[0] }, replace: true });
-  }, [groupBy, labels.data]);
+  }, [groupBy, labelSelector, tenantID, labels.data, labels.fetching]);
 
   const active = !!profileTypeID && !!groupBy;
   const grouped = useFetched(

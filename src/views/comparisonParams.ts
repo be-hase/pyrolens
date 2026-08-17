@@ -1,6 +1,34 @@
 import { isRelative, resolveTime, type TimeRange } from '../time';
 import { useRoute } from '../urlState';
 
+// Mirrors src/time.ts's (unexported) unit table — this file's arithmetic on
+// relative offsets is the only other place that needs it.
+const UNIT_MS: Record<string, number> = {
+  s: 1_000,
+  m: 60_000,
+  h: 3_600_000,
+  d: 86_400_000,
+  w: 604_800_000,
+};
+const RELATIVE_OFFSET = /^now-(\d+)([smhdw])$/;
+
+// Largest unit (w down to s) that expresses `ms` with no remainder. Offsets
+// built from "now-N<unit>" values are always whole seconds at minimum, so
+// this never needs a fallback past "s".
+function expressOffset(ms: number): string {
+  const units: [string, number][] = [
+    ['w', UNIT_MS.w],
+    ['d', UNIT_MS.d],
+    ['h', UNIT_MS.h],
+    ['m', UNIT_MS.m],
+    ['s', UNIT_MS.s],
+  ];
+  for (const [suffix, size] of units) {
+    if (ms % size === 0) return `now-${ms / size}${suffix}`;
+  }
+  return `now-${Math.round(ms / 1000)}s`;
+}
+
 export interface PaneParams {
   /** URL param prefix: "left" or "right". */
   side: 'left' | 'right';
@@ -76,7 +104,7 @@ export function previousPeriodParams(
   // from a bare "now"), so only the "now-N<unit>" form needs handling; a
   // `from` that doesn't match it falls through to the absolute branch below.
   if (isRelative(from) && (until === 'now' || !until)) {
-    const rel = from.match(/^now-(\d+)([smhdw])$/);
+    const rel = from.match(RELATIVE_OFFSET);
     if (rel) {
       // Doubling the offset in the same unit is exact — no unit-conversion
       // rounding the way going through milliseconds and back would risk.
@@ -91,6 +119,45 @@ export function previousPeriodParams(
         rightFrom: from,
         rightUntil: 'now',
       };
+    }
+  } else if (isRelative(from) && isRelative(until)) {
+    // `until` is itself a moving offset ("now-5m"), not just "now" — the
+    // same failure mode as above, just with a nonzero right edge. Unlike the
+    // until==='now' case, the two ends can be different units, so this does
+    // the widening in milliseconds and re-expresses the result in whatever
+    // unit divides it exactly, rather than trying to stay in `from`'s unit.
+    const fromRel = from.match(RELATIVE_OFFSET);
+    const untilRel = until.match(RELATIVE_OFFSET);
+    if (fromRel && untilRel) {
+      const fromOffset = Number(fromRel[1]) * UNIT_MS[fromRel[2]];
+      const untilOffset = Number(untilRel[1]) * UNIT_MS[untilRel[2]];
+      // fromOffset must be the larger (further-back) offset, or the pair is
+      // degenerate/inverted; fall through to the absolute branch below,
+      // which only reads the already-resolved `range` and so handles an
+      // inverted pair the same way it handles one passed as absolute ms.
+      if (fromOffset > untilOffset) {
+        const span = fromOffset - untilOffset;
+        const widenedFrom = expressOffset(2 * fromOffset - untilOffset);
+        // Pane params (leftFrom/leftUntil/rightFrom/rightUntil) live in a
+        // different coordinate frame than the main from/until: useComparisonParams
+        // resolves them with `now = mainRange.end`, not the wall clock. Here
+        // mainRange.end is realNow - untilOffset, not realNow itself (unlike
+        // the until==='now' branch above, where the two coincide and reusing
+        // main-frame strings is exact) — so reusing `from`/`until` verbatim
+        // as pane bounds would apply the until-offset a second time. The
+        // pane frame only needs the span: the anchor already sits at the
+        // widened window's un-widened `until`, so "now" IS that boundary.
+        return {
+          from: widenedFrom,
+          until,
+          leftQuery: query,
+          rightQuery: query,
+          leftFrom: expressOffset(2 * span),
+          leftUntil: expressOffset(span),
+          rightFrom: expressOffset(span),
+          rightUntil: 'now',
+        };
+      }
     }
   }
 
@@ -138,8 +205,10 @@ function completedPaneWindow(
         : null;
   // Left's default `until` is the midpoint; right's default `until` is the
   // main end, i.e. exactly "now" (mainRange.end === now, see
-  // useComparisonParams), so it's always expressible when the main range is
-  // relative.
+  // useComparisonParams) — always expressible when the main range is
+  // relative, and correct whether the main range's own raw `until` is "now"
+  // or an offset like "now-5m": a pane's "now" always resolves against
+  // mainRange.end, never against the main range's raw until string.
   const relUntil =
     side === 'left'
       ? mainSpan % 2000 === 0
@@ -189,8 +258,12 @@ export function swappedPaneParams(
     right.fromOverride != null ||
     right.untilOverride != null
   ) {
+    // A moving main range isn't only the literal until==='now' spelling —
+    // "now-5m" advances too (see previousPeriodParams above) — so this has
+    // to accept any relative until, not just "now"/absent, or a range like
+    // that falls to the absolute branch below and Swap sides freezes it.
     const isRelativeMain =
-      isRelative(mainFrom) && (mainUntil === 'now' || !mainUntil);
+      isRelative(mainFrom) && (isRelative(mainUntil) || !mainUntil);
     const mainSpan = mainRange.end - mainRange.start;
     const leftWindow = completedPaneWindow(
       'left',
@@ -215,16 +288,18 @@ export function swappedPaneParams(
 
   const span = mainRange.end - mainRange.start;
   // Case 2: both panes are still at their defaults (no raw overrides at
-  // all) and the main range is relative. A raw-null swap here would be a
-  // visible no-op — both panes would keep resolving to the exact halves
-  // they already show — so instead emit explicit relative params that swap
-  // which half is which (left takes the later half, right the earlier one),
-  // keeping the comparison sliding under auto-refresh instead of freezing
-  // it the way writing absolute bounds would. Needs a whole-second span to
-  // express exactly as "now-Ns".
+  // all) and the main range is relative — either until==='now' or a moving
+  // offset like "now-5m" (see the isRelativeMain comment in Case 1; a pane's
+  // "now" anchors to mainRange.end regardless of which spelling the main
+  // range uses). A raw-null swap here would be a visible no-op — both panes
+  // would keep resolving to the exact halves they already show — so instead
+  // emit explicit relative params that swap which half is which (left takes
+  // the later half, right the earlier one), keeping the comparison sliding
+  // under auto-refresh instead of freezing it the way writing absolute
+  // bounds would. Needs a whole-second span to express exactly as "now-Ns".
   if (
     isRelative(mainFrom) &&
-    (mainUntil === 'now' || !mainUntil) &&
+    (isRelative(mainUntil) || !mainUntil) &&
     span % 2000 === 0
   ) {
     const halfSeconds = span / 2 / 1000;
