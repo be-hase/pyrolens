@@ -234,13 +234,23 @@ export function App() {
 
   // No query in the URL yet: default to the first service and its preferred
   // profile type, written back into the URL (replace, so Back still works).
-  // `queryDefaultDue` is the exact condition under which this write fires —
+  // `queryDefaultDue` is the exact condition under which a write is DUE —
   // shared with every view's startup-gap flag (defaultQueryPending,
-  // queryLang.ts) so neither side can drift from what this effect actually
-  // does.
+  // queryLang.ts) so neither side can drift from what "pending" means, and
+  // that is correct for them as is: while a fetch is in flight they should
+  // show Loading, "pending" or not.
+  //
+  // Due is not the same as safe to act ON, though. `services` is
+  // stale-while-refetching (useFetched), so right after a tenant switch
+  // (which resets `query` to nothing) it still holds the OLD tenant's list
+  // while the NEW tenant's fetch is in flight — `queryDefaultDue` reads true
+  // from that stale list, and writing from it would default the new tenant
+  // into a service that named the old one's world. This effect additionally
+  // waits for `!servicesLoading`, i.e. for the list to be current for the
+  // present `tenantID`, before it may write.
   const queryDefaultDue = defaultQueryPending(services, rawQuery);
   useEffect(() => {
-    if (!ready || !queryDefaultDue) return;
+    if (!ready || !queryDefaultDue || servicesLoading) return;
     const first = services[0];
     const profileType = sortProfileTypes(first.profileTypes)[0];
     if (!profileType) return;
@@ -248,7 +258,7 @@ export function App() {
       set: { query: buildQuery(first.name, profileType) },
       replace: true,
     });
-  }, [ready, queryDefaultDue, services]);
+  }, [ready, queryDefaultDue, services, servicesLoading]);
 
   return (
     <div className="app">
@@ -304,7 +314,34 @@ export function App() {
           initial={tenant ?? storedTenant ?? undefined}
           onSubmit={(t: string) => {
             setChangingTenant(false);
-            navigate({ set: { tenant: t }, replace: !tenant });
+            if (t === tenant) {
+              // Resubmitting the current tenant is a cancel, not a Run: even
+              // a no-op navigate() would advance "now" and refire every
+              // fetch, which closing the dialog must not do.
+              return;
+            }
+            if (!tenant) {
+              // Initial pick (first dialog on load): a deep link to a
+              // multi-tenant instance carries params meant for the tenant
+              // about to be entered, so keep them.
+              navigate({ set: { tenant: t }, replace: true });
+              return;
+            }
+            // Real switch: reset the whole URL, not just its params. The old
+            // tenant's params (query, groupBy, pane overrides, fgSearch,
+            // ...) name that tenant's world and make no sense against the
+            // new one, and the view itself may be mid-flight on data (a
+            // pane's query, a sandwich focus) that means nothing for a
+            // tenant that hasn't been looked at yet — so land back on the
+            // root view too. Push (not replace) so Back restores the
+            // previous tenant with its full context, view included.
+            navigate({
+              path: '/',
+              set: {
+                ...Object.fromEntries([...params.keys()].map((k) => [k, null])),
+                tenant: t,
+              },
+            });
           }}
         />
       )}
