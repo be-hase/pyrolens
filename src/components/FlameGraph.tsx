@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { Empty, type EmptyAction } from '@components/core/Empty';
+import { Loading } from '@components/core/Loading';
 import { profileTypeUnit, type FlamegraphData } from '@api/client';
 import { useFlameGraphUrlState } from '@hooks/useFlameGraphUrlState';
 import { FlameGraph as GrafanaFlameGraph } from '@lib/flamegraph';
@@ -58,10 +59,14 @@ export function FlameGraph({
     );
   }
 
-  // The panel's own "Loading…" meta already says a fetch is in flight;
-  // rendering the neutral placeholder too would just be a second, redundant
-  // message, so this renders nothing rather than a default Empty.
-  if (loading) return null;
+  // Render a visible placeholder rather than nothing: the panel's own
+  // "Loading…" meta is a small string easy to miss, and in Comparison the
+  // pane's meta slot is occupied by the window label, leaving no signal at
+  // all there. Returning null here used to read as "the app is broken" on a
+  // slow query. The data-present branch above is untouched — a refresh over
+  // frames already on screen keeps showing them, per AGENTS.md ("a retry
+  // shows the previous answer while reloading").
+  if (loading) return <Loading />;
 
   return <Empty message={empty?.message} action={empty?.action} />;
 }

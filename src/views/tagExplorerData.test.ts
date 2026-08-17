@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import type { TagRow } from './tagExplorerData.ts';
 import {
+  breakdownSettingUp,
   formatCell,
   groupByLabels,
   sortRows,
@@ -239,5 +240,34 @@ describe('formatCell', () => {
   it('shows zero as zero', () => {
     assert.equal(formatCell(0, 'ns'), '0');
     assert.equal(formatCell(0, 'count'), '0');
+  });
+});
+
+describe('breakdownSettingUp', () => {
+  it('is true while the labels fetch has never settled and groupBy is unset', () => {
+    assert.equal(breakdownSettingUp(true, '', false, 0), true);
+  });
+
+  it('is true once labels settle non-empty but groupBy has not been written yet', () => {
+    // FIX 3(a): the default-groupBy effect (TagExplorerView.tsx) is about to
+    // fire and write one — this is the due-navigation frame between the
+    // labels fetch settling and that write landing, not a concluded state.
+    assert.equal(breakdownSettingUp(true, '', true, 2), true);
+  });
+
+  it('is false once labels settle empty — the honest, final conclusion', () => {
+    // No default write is ever coming for an empty list (see
+    // TagExplorerView's reset effect: `if (labels.data.length === 0)
+    // return;`), so this must not keep claiming "still working" forever.
+    assert.equal(breakdownSettingUp(true, '', true, 0), false);
+  });
+
+  it('is false once groupBy is set, regardless of the labels fetch state', () => {
+    assert.equal(breakdownSettingUp(true, 'region', false, 2), false);
+    assert.equal(breakdownSettingUp(true, 'region', true, 2), false);
+  });
+
+  it('is false when there is no query yet — that is startingUp’s job, not this one’s', () => {
+    assert.equal(breakdownSettingUp(false, '', false, 0), false);
   });
 });

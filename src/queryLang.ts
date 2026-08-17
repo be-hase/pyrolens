@@ -6,6 +6,8 @@
 // selector, but the Pyroscope querier API wants it split out as a dedicated
 // `profileTypeID` argument next to a plain `labelSelector`.
 
+import { sortProfileTypes, type Service } from '@api/client';
+
 type MatcherOp = '=' | '!=' | '=~' | '!~';
 
 interface Matcher {
@@ -252,6 +254,28 @@ export function buildQuery(service: string, profileTypeID: string): string {
     { label: SERVICE_NAME, op: '=', value: service },
     { label: PROFILE_TYPE, op: '=', value: profileTypeID },
   ]);
+}
+
+/**
+ * Whether App's default-query effect (App.tsx) is about to write a `query`
+ * param: the URL has none yet (`rawQuery === null` — an explicit `''` from a
+ * cleared query bar is a real answer, not a gap) and a service list has
+ * arrived with a usable profile type on its first entry, the same pair
+ * `buildQuery` would be called with.
+ *
+ * Shared by App's effect and every view's startup-gap flag so the two agree
+ * by construction — the same reasoning as {@link assessProfileType}'s three
+ * readers. A view re-deriving its own notion of "is a write coming" could
+ * drift from the effect's actual condition and paint a false conclusion (or
+ * a permanent spinner) in the one render between them disagreeing.
+ */
+export function defaultQueryPending(
+  services: Service[],
+  rawQuery: string | null,
+): boolean {
+  if (rawQuery !== null || services.length === 0) return false;
+  const first = services[0];
+  return !!sortProfileTypes(first.profileTypes)[0];
 }
 
 /** True for reserved dunder labels such as `__session_id__`. */

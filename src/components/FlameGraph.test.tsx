@@ -1,3 +1,4 @@
+import { render, screen } from '@testing-library/react';
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import {
@@ -5,6 +6,7 @@ import {
   sandwichNavigateOptions,
   searchNavigateOptions,
 } from '@hooks/useFlameGraphUrlState';
+import { FlameGraph } from './FlameGraph.tsx';
 
 // The wrapper's actual JSX renders the vendored flame graph, which needs a
 // real canvas context to mount without throwing — jsdom does not provide
@@ -20,6 +22,48 @@ import {
 // and that the container's own reset-on-data-change effect leaves a
 // controlled sandwich alone (verified by hand against FlameGraphContainer.tsx
 // while implementing it, since it isn't reachable from jsdom either).
+//
+// The loading/empty placeholder tests below DO render the component tree —
+// with `data: { names: [], levels: [] }` flamebearerToDataFrame returns
+// undefined, so FlameGraph never reaches the vendored flame graph and the
+// canvas problem above doesn't apply.
+
+const PROFILE_TYPE = 'process_cpu:cpu:nanoseconds:cpu:nanoseconds';
+const NO_FRAMES = { names: [], levels: [] };
+
+describe('FlameGraph loading placeholder', () => {
+  it('shows the loading indicator, not Empty, while a fetch is in flight with no frames yet', () => {
+    render(
+      <FlameGraph data={NO_FRAMES} profileTypeId={PROFILE_TYPE} loading />,
+    );
+    assert.ok(
+      screen.getByText('Loading…'),
+      'expected the Loading placeholder while loading with no frames',
+    );
+    assert.ok(
+      !screen.queryByText('No data available'),
+      "Empty's default message must not render while loading",
+    );
+  });
+
+  it('falls back to Empty once the fetch has settled with no frames', () => {
+    render(
+      <FlameGraph
+        data={NO_FRAMES}
+        profileTypeId={PROFILE_TYPE}
+        loading={false}
+      />,
+    );
+    assert.ok(
+      screen.getByText('No data available'),
+      'expected Empty once not loading',
+    );
+    assert.ok(
+      !screen.queryByText('Loading…'),
+      'the loading indicator must not render once the fetch has settled',
+    );
+  });
+});
 
 describe('flameGraphUrlState', () => {
   it('reads fgSearch and fgSandwich off the URL', () => {

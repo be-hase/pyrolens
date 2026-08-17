@@ -183,6 +183,23 @@ describe('App tenancy', () => {
     assert.equal(seen('tenant'), '');
   });
 
+  it('shows a loading placeholder below the NavBar while the tenant probe is still pending', async () => {
+    // A promise that never resolves keeps status === 'checking' for the
+    // whole test — `ready` is false and there is no error, so the content
+    // area used to render nothing at all here.
+    multitenancyOf.mockReturnValue(new Promise(() => {}));
+
+    const { container } = render(<App />);
+    await waitFor(() => assert.ok(screen.getByRole('navigation')));
+
+    assert.ok(
+      container.querySelector('.loading'),
+      'expected the Loading placeholder below the NavBar while the probe is pending',
+    );
+    assert.ok(!screen.queryByTestId('single'));
+    assert.ok(!screen.queryByText(/Failed to reach Pyroscope/));
+  });
+
   it('surfaces a failing service list without hiding the view', async () => {
     servicesOf.mockRejectedValueOnce(new Error('service list unavailable'));
     render(<App />);

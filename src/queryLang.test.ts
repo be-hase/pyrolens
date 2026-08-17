@@ -1,7 +1,9 @@
 import { describe, it } from 'vitest';
 import assert from 'node:assert/strict';
+import type { Service } from '@api/client';
 import {
   buildQuery,
+  defaultQueryPending,
   escapeValue,
   isInternalLabel,
   isMalformedQuery,
@@ -605,5 +607,39 @@ describe('empty profile_type value', () => {
 
   it('parseQuery returns null for an explicit empty profile_type value', () => {
     assert.equal(parseQuery('{service_name="s", profile_type=""}'), null);
+  });
+});
+
+describe('defaultQueryPending', () => {
+  const WEB: Service = { name: 'web', profileTypes: [CPU] };
+
+  it('is true once services have arrived and the URL has no query param', () => {
+    assert.equal(defaultQueryPending([WEB], null), true);
+  });
+
+  it('is false while the URL has no query param but no services have arrived yet', () => {
+    // The services fetch's own first-load window — the caller must gate
+    // this separately (see App.tsx / ViewProps.servicesSettled), not fold it
+    // into this helper, or the two windows (services never settled vs.
+    // settled with a write due) would be indistinguishable to a caller that
+    // needs to tell them apart.
+    assert.equal(defaultQueryPending([], null), false);
+  });
+
+  it('is false once an explicit query param exists, even an empty one', () => {
+    // '' means the query bar was cleared on purpose — App.tsx's own
+    // rawQuery !== null distinction, mirrored here so the two conditions
+    // can never drift apart.
+    assert.equal(defaultQueryPending([WEB], ''), false);
+    assert.equal(defaultQueryPending([WEB], '{a="b"}'), false);
+  });
+
+  it('is false when the first service has no usable profile type', () => {
+    // Mirrors App.tsx's own guard (`if (!profileType) return;`) — an empty
+    // profileTypes list on the first service means no write is coming.
+    assert.equal(
+      defaultQueryPending([{ name: 'web', profileTypes: [] }], null),
+      false,
+    );
   });
 });

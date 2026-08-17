@@ -5,6 +5,7 @@ import { MultiTimeSeries, type NamedSeries } from '@components/MultiTimeSeries';
 import { SERIES_COLORS } from '@components/seriesColors';
 import { Panel } from '@components/Panel';
 import { Empty } from '@components/core/Empty';
+import { Loading } from '@components/core/Loading';
 import {
   fetchGroupedTimelines,
   fetchLabelNames,
@@ -12,9 +13,15 @@ import {
 } from '@api/client';
 import { useFetched } from '@hooks/useFetched';
 import { malformedMessage } from '@hooks/useProfileData';
-import { splitQuery, toInternalLabel, upsertMatcher } from '../queryLang';
+import {
+  defaultQueryPending,
+  splitQuery,
+  toInternalLabel,
+  upsertMatcher,
+} from '../queryLang';
 import { timelineStep } from '../time';
 import {
+  breakdownSettingUp,
   formatCell,
   groupByLabels,
   sortRows,
@@ -61,6 +68,7 @@ const rowKey = (value: string | null) =>
 export function TagExplorerView({
   services,
   servicesLoading,
+  servicesSettled,
   query,
   from,
   until,
@@ -165,6 +173,32 @@ export function TagExplorerView({
     [profileTypeID, labelSelector, groupBy, range.start, range.end, tenantID],
   );
   const loading = active && grouped.fetching;
+  // While the labels fetch (a prerequisite stage of the same pipeline) is
+  // still in flight, or has settled non-empty but the default-groupBy effect
+  // below hasn't written `groupBy` yet, `active` (and therefore `loading`)
+  // is false — but the pipeline is still working, not concluded. Rendering
+  // "No data available" / "No profiles matched" during this stage would be
+  // a false conclusion. Uses `labels.settled`, not `labels.fetching` — the
+  // latter pulses true again on every auto-refresh tick (the labels fetch is
+  // keyed on range.start/range.end), which would flip an already-settled,
+  // honestly empty breakdown (a query with nothing to group by) back into
+  // the spinner on every tick. See breakdownSettingUp (tagExplorerData.ts).
+  const settingUp = breakdownSettingUp(
+    !!profileTypeID,
+    groupBy,
+    labels.settled,
+    labels.data.length,
+  );
+  // Startup gap: before the services fetch settles, or after it settles
+  // with App's default-query write still due (see App.tsx / queryLang.ts's
+  // `defaultQueryPending`), `profileTypeID` is empty because there is no
+  // query yet — not because one was asked and matched nothing. Same
+  // false-conclusion risk as `settingUp` above; `!servicesSettled` (not
+  // `servicesLoading`) for the same reason.
+  const startingUp =
+    (!servicesSettled || defaultQueryPending(services, params.get('query'))) &&
+    !profileTypeID;
+  const stillWorking = loading || settingUp || startingUp;
   const error =
     malformedMessage(query) ??
     (active ? grouped.fetchError : null) ??
@@ -273,12 +307,17 @@ export function TagExplorerView({
     });
   };
 
-  // No-frames placeholder for the Breakdown panel. While loading, the
-  // Timeline panel above already shows "Loading…" — see FlameGraph's
-  // identical reasoning for rendering nothing rather than a second,
-  // redundant message. And no contextual claim while the banner already
-  // shows this fetch's error — see FlameGraph's identical gate.
-  const breakdownEmpty = loading ? null : (
+  // No-frames placeholder for the Breakdown panel. While loading, this
+  // renders Loading rather than nothing — see FlameGraph's identical
+  // reasoning: the Timeline panel's own "Loading…" meta is a different
+  // panel from the Breakdown table, easy to miss, and now that the timeline
+  // chart itself shows a loading placeholder too, a silent Breakdown table
+  // would be the one area left with no signal. No contextual claim while
+  // the banner already shows this fetch's error — see FlameGraph's
+  // identical gate.
+  const breakdownEmpty = stillWorking ? (
+    <Loading />
+  ) : (
     <Empty message={error ? undefined : BREAKDOWN_EMPTY_MESSAGE} />
   );
 
@@ -315,7 +354,7 @@ export function TagExplorerView({
       <Panel
         title={groupBy ? `Timeline by ${groupBy}` : 'Timeline'}
         meta={
-          loading
+          stillWorking
             ? 'Loading…'
             : allRows.length > MAX_SERIES
               ? `top ${MAX_SERIES} of ${allRows.length} series`
@@ -327,6 +366,7 @@ export function TagExplorerView({
           profileTypeId={profileTypeID}
           startMs={range.start}
           endMs={range.end}
+          loading={stillWorking}
         />
       </Panel>
 

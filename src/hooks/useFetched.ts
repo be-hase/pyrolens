@@ -31,12 +31,24 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 //   counts as loading after a retry), never in `dataKey` (so a retry keeps
 //   showing that key's previous data while it reloads — the same
 //   stale-while-refetching behaviour a deps change gets).
+// - `settled` is true once any run — success or failure, for any key — has
+//   completed since mount, and never goes back to false. It is derived from
+//   `dataKey`/`errorKey`: both start `null` and are only ever assigned
+//   forward (a completed run's key), never cleared, so "either is non-null"
+//   already means "at least one run has finished" with no extra state and
+//   nothing to reset. A caller gating a startup placeholder ("has the first
+//   answer arrived yet") must read this, not `fetching` — `fetching` pulses
+//   true again on every background refetch (a deps change, an auto-refresh
+//   tick), and a gate built on it would flip an already-settled, honestly
+//   empty conclusion back into a spinner on every one of those pulses
+//   instead of only before the first answer ever arrives.
 
 export interface Fetched<T> {
   data: T;
   fetching: boolean;
   fetchError: string | null;
   retry: () => void;
+  settled: boolean;
 }
 
 /**
@@ -143,5 +155,8 @@ export function useFetched<T>(
     // successor's effect has run (and cleared it) — see the header comment.
     fetchError: errorKey === key ? fetchError : null,
     retry,
+    // See the header comment: monotonic, derived from dataKey/errorKey only
+    // ever moving from null to a real key.
+    settled: dataKey !== null || errorKey !== null,
   };
 }

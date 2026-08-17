@@ -35,6 +35,7 @@ const QUERY = `{service_name="web", profile_type="${CPU}"}`;
 const PROPS: ViewProps = {
   services: [],
   servicesLoading: false,
+  servicesSettled: true,
   query: QUERY,
   from: 'now-1h',
   until: 'now',
@@ -139,6 +140,150 @@ describe('DiffView profile-type mismatch', () => {
       assert.equal(
         new URLSearchParams(window.location.search).get('rightQuery'),
         leftOverride,
+      ),
+    );
+  });
+});
+
+describe('DiffView loading placeholder', () => {
+  it('shows the loading indicator in the diff flamegraph body while the diff fetch is pending', async () => {
+    // A promise that never resolves during this test keeps `diff` loading —
+    // the diffEmpty branch (dataFrame is falsy while diff is still null)
+    // must render Loading in the panel body, not just the panel meta's own
+    // "Loading…" text (which renders regardless and would make a
+    // text-content-only assertion pass even against the unfixed `null`).
+    // `.loading` is the new component's own class, distinct from
+    // `.panel-meta`, so this pins the assertion to the body placeholder.
+    diffOf.mockReturnValue(new Promise(() => {}));
+
+    const { container } = render(<DiffView {...PROPS} />);
+
+    await waitFor(() =>
+      assert.ok(
+        container.querySelector('.loading'),
+        'expected the Loading placeholder in the diff flamegraph body while the diff fetch is pending',
+      ),
+    );
+  });
+
+  it('pins the wiring: each pane timeline shows the loading indicator while its own fetch is pending', async () => {
+    // A Comparison-pane-level flamegraph check (PaneFlamegraph, in
+    // ComparisonView.tsx) is out of scope here — it isn't a file this task
+    // may touch and there's no existing view-level harness for it. This
+    // covers the equally real regression risk that's actually in scope:
+    // ComparisonPane wiring its own `loading` through to the TimeSeries it
+    // renders (both Baseline and Comparison panes render one, and DiffView
+    // already mounts both). The diff fetch itself resolves normally so only
+    // the pane timelines stay pending, isolating what's under test.
+    timelineOf.mockReturnValue(new Promise(() => {}));
+
+    const { container } = render(<DiffView {...PROPS} />);
+
+    await waitFor(() =>
+      assert.equal(
+        container.querySelectorAll('.loading').length,
+        2,
+        'expected both pane timelines (Baseline and Comparison) to show the loading indicator',
+      ),
+    );
+  });
+});
+
+describe('DiffView startup gap before the default query resolves', () => {
+  it('shows the loading indicator in both panes and the diff panel instead of the empty-state text while services have never settled and no query yet', async () => {
+    // Mirrors App.tsx: before the services fetch settles, no default query
+    // has been written into the URL yet, so query='' and both panes inherit
+    // it (see useComparisonParams) — neither side has a profile type, so the
+    // diff RPC never runs (useDiffFlamegraph's `active` needs both types),
+    // and the diff panel used to fall through to the generic "no profiles
+    // matched" message instead of showing this is still a startup gap.
+    const { container } = render(
+      <DiffView
+        {...PROPS}
+        query=""
+        servicesLoading
+        servicesSettled={false}
+        services={[]}
+      />,
+    );
+
+    await waitFor(() =>
+      assert.equal(
+        container.querySelectorAll('.loading').length,
+        3,
+        'expected both pane timelines and the diff flamegraph body to show the Loading placeholder',
+      ),
+    );
+    assert.ok(
+      !screen.queryByText(
+        /No profiles matched this query in the baseline or comparison window/,
+      ),
+    );
+  });
+});
+
+describe('DiffView one-sided deep link during a services startup gap (FINDING 2)', () => {
+  it('shows the loading indicator, not the mismatch or empty conclusion, when only one pane has a resolved profile type', async () => {
+    // Deep link supplies a profile_type on the left pane only; there is no
+    // main `query` param, so the right pane inherits the still-unset main
+    // query and has no type yet. Before FIX 2, `settlingQuery` required
+    // BOTH types to be absent (`!leftType && !rightType`), so this
+    // one-sided case fell through past the startup-gap gate while services
+    // were still resolving the default query.
+    const params = new URLSearchParams();
+    params.set('leftQuery', QUERY);
+    at(`/?${params.toString()}`);
+
+    const { container } = render(
+      <DiffView
+        {...PROPS}
+        query=""
+        servicesLoading
+        servicesSettled={false}
+        services={[]}
+      />,
+    );
+
+    await waitFor(() =>
+      assert.ok(
+        container.querySelector('.loading'),
+        'expected the Loading placeholder in the diff flamegraph body',
+      ),
+    );
+    assert.ok(
+      !screen.queryByText(
+        /Diff needs both panes to query the same profile type/,
+      ),
+    );
+    assert.ok(
+      !screen.queryByText(
+        /No profiles matched this query in the baseline or comparison window/,
+      ),
+    );
+  });
+});
+
+describe('DiffView due-navigation gap before the default query lands (FINDING 3)', () => {
+  it('shows the loading indicator instead of the empty conclusion once services settle non-empty but the URL still has no query param', async () => {
+    at('/');
+    const { container } = render(
+      <DiffView
+        {...PROPS}
+        query=""
+        servicesSettled
+        services={[{ name: 'web', profileTypes: [CPU] }]}
+      />,
+    );
+
+    await waitFor(() =>
+      assert.ok(
+        container.querySelector('.loading'),
+        'expected the Loading placeholder while the default-query write is due',
+      ),
+    );
+    assert.ok(
+      !screen.queryByText(
+        /No profiles matched this query in the baseline or comparison window/,
       ),
     );
   });

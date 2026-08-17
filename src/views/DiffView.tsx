@@ -4,6 +4,7 @@ import { ControlsBar } from '@components/ControlsBar';
 import { Panel } from '@components/Panel';
 import { Button } from '@components/core/Button';
 import { Empty } from '@components/core/Empty';
+import { Loading } from '@components/core/Loading';
 import { parseMaxNodes, profileTypeUnit } from '@api/client';
 import { FlameGraph as GrafanaFlameGraph } from '@lib/flamegraph';
 import {
@@ -12,7 +13,7 @@ import {
 } from '@components/flamebearer';
 import { useDiffFlamegraph } from '@hooks/useProfileData';
 import { useFlameGraphUrlState } from '@hooks/useFlameGraphUrlState';
-import { splitQuery } from '../queryLang';
+import { defaultQueryPending, splitQuery } from '../queryLang';
 import { navigate, useRoute } from '../urlState';
 import { ComparisonPane, ErrorBanner } from './ComparisonPane';
 import { swappedPaneParams, useComparisonParams } from './comparisonParams';
@@ -29,6 +30,7 @@ const DIFF_EMPTY_MESSAGE =
 export function DiffView({
   services,
   servicesLoading,
+  servicesSettled,
   query,
   from,
   until,
@@ -62,6 +64,22 @@ export function DiffView({
   // of falling through to the generic "no profiles matched" placeholder,
   // which would misstate a request that was never sent as an empty result.
   const typeMismatch = !!leftType && !!rightType && leftType !== rightType;
+  // Startup gap: before the main query resolves, both panes inherit it
+  // while unset (see useComparisonParams) — so a side with no profile type
+  // may just be waiting for that, not have matched nothing.
+  // `queryStartupGap` covers both windows (see ComparisonView's identical
+  // flag / queryLang.ts's `defaultQueryPending`): the services fetch never
+  // having settled, and it having settled with a default-query write due
+  // but not yet landed in the URL. Deliberately `!leftType || !rightType`,
+  // not `&&` — a one-sided deep link (only `leftQuery` set, no main `query`)
+  // has one type present and one still pending during startup, and `&&`
+  // would let the false "no profiles matched"/mismatch conclusion through
+  // for that case. The mismatch path above still requires *both* types
+  // present, so it is unaffected.
+  const queryStartupGap =
+    !servicesSettled || defaultQueryPending(services, params.get('query'));
+  const settlingQuery = queryStartupGap && (!leftType || !rightType);
+  const diffLoading = loading || settlingQuery;
 
   const unit = grafanaUnit(profileTypeUnit(leftType));
   const dataFrame = useMemo(
@@ -69,12 +87,16 @@ export function DiffView({
     [diff, unit],
   );
 
-  // No-frames placeholder for when dataFrame is falsy. While loading, the
-  // panel's own "Loading…" meta above already says so — see FlameGraph's
-  // identical reasoning for rendering nothing rather than a second,
-  // redundant message. And no contextual claim while the banner already
-  // shows this fetch's error — see FlameGraph's identical gate.
-  const diffEmpty = loading ? null : typeMismatch ? (
+  // No-frames placeholder for when dataFrame is falsy. While loading, this
+  // renders Loading rather than nothing — see FlameGraph's identical
+  // reasoning: the panel's own "Loading…" meta is easy to miss, and this is
+  // the only flame graph panel in the app whose loading state has no
+  // sibling flame graph on screen to lean on. No contextual claim while the
+  // banner already shows this fetch's error — see FlameGraph's identical
+  // gate.
+  const diffEmpty = diffLoading ? (
+    <Loading />
+  ) : typeMismatch ? (
     <Empty
       message={
         `Baseline queries profile type "${leftType}" and Comparison ` +
@@ -129,6 +151,7 @@ export function DiffView({
           mainRange={range}
           mainFrom={from}
           tenantID={tenantID}
+          queryStartupGap={queryStartupGap}
         />
         <ComparisonPane
           title="Comparison"
@@ -136,12 +159,16 @@ export function DiffView({
           mainRange={range}
           mainFrom={from}
           tenantID={tenantID}
+          queryStartupGap={queryStartupGap}
         />
       </div>
 
       {error && <ErrorBanner error={error} retry={retry} />}
 
-      <Panel title="Diff flamegraph" meta={loading ? 'Loading…' : undefined}>
+      <Panel
+        title="Diff flamegraph"
+        meta={diffLoading ? 'Loading…' : undefined}
+      >
         {dataFrame ? (
           <div className="flamegraph-wrapper">
             <GrafanaFlameGraph
