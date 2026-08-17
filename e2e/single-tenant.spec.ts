@@ -75,18 +75,23 @@ test('a tenant pasted into the URL is stripped once single-tenant is confirmed',
     (current) => !current.searchParams.has('tenant'),
   );
 
-  const log = await (
-    await page.request.get('http://127.0.0.1:4144/__log')
-  ).json();
-  const queries = log.filter(
-    (entry: { method: string }) => entry.method !== 'LabelNames',
-  );
-  expect(queries.length).toBeGreaterThan(0);
-  // End state, not the flash: one team-a request can physically reach the
-  // fake before the strip's navigation supersedes it (an abort doesn't
-  // un-send bytes already on the wire), but that request is discarded and
-  // the settled query carries no tenant — which is what recovers an
-  // allowlist deployment. Assert the last query, not every one.
-  const last = queries[queries.length - 1] as { tenant: string | null };
-  expect(last.tenant).toBe(null);
+  // What the strip must guarantee is that a TENANTLESS refetch was issued —
+  // that is what recovers an allowlist deployment. The team-a request that
+  // was already on the wire is aborted client-side and its response
+  // discarded, but its bytes still reach the fake, and arrival order is not
+  // deterministic: it can be logged either side of the strip's own refetch.
+  // So neither "every query" nor "the last query" is assertable (the latter
+  // flaked ~1 in 20 locally); poll for the tenantless query's existence,
+  // which only the strip's refetch can produce.
+  await expect
+    .poll(async () => {
+      const log = await (
+        await page.request.get('http://127.0.0.1:4144/__log')
+      ).json();
+      return log.some(
+        (entry: { method: string; tenant: string | null }) =>
+          entry.method !== 'LabelNames' && entry.tenant === null,
+      );
+    })
+    .toBe(true);
 });
