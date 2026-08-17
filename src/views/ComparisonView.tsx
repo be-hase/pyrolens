@@ -4,7 +4,7 @@ import { FlameGraph } from '@components/FlameGraph';
 import { Button } from '@components/core/Button';
 import { useFlamegraph } from '@hooks/useProfileData';
 import { parseMaxNodes } from '@api/client';
-import { splitQuery } from '../queryLang';
+import { defaultQueryPending, splitQuery } from '../queryLang';
 import { navigate, useRoute } from '../urlState';
 import { ComparisonPane, ErrorBanner } from './ComparisonPane';
 import {
@@ -30,6 +30,7 @@ function PaneFlamegraph({
   from,
   until,
   maxNodes,
+  queryStartupGap,
 }: {
   pane: PaneParams;
   tenantID?: string;
@@ -39,6 +40,15 @@ function PaneFlamegraph({
   until: string;
   /** Caps the node count per pane's query; server default when unset. */
   maxNodes?: number;
+  /**
+   * Whether the main query hasn't resolved to something real yet — either
+   * the services fetch has never settled, or it has and a default-query
+   * write is due but hasn't landed in the URL. See ComparisonView's
+   * `queryStartupGap` and SingleView's identical `settlingQuery` for the
+   * full reasoning; this pane just receives the precomputed result so it
+   * doesn't need `services`/the raw `query` param itself.
+   */
+  queryStartupGap?: boolean;
 }) {
   const { flamegraph, loading, error, retry } = useFlamegraph({
     query: pane.query,
@@ -47,6 +57,10 @@ function PaneFlamegraph({
     maxNodes,
   });
   const { profileTypeID } = splitQuery(pane.query);
+  // Startup gap: before the main query resolves, an inheriting pane's query
+  // is still the unset main query, so `profileTypeID` is empty because
+  // there is no query yet — not because nothing matched.
+  const settlingQuery = !!queryStartupGap && !profileTypeID;
   return (
     <>
       {error && <ErrorBanner error={error} retry={retry} />}
@@ -54,18 +68,24 @@ function PaneFlamegraph({
         data={flamegraph}
         profileTypeId={profileTypeID}
         vertical
-        loading={loading}
+        loading={loading || settlingQuery}
         // Suppressed while this pane has its own error — see SingleView's
         // identical gate.
         empty={
           error
             ? undefined
             : !profileTypeID
-              ? // No usable query on this pane means no fetch was ever sent
-                // (see SingleView's identical gate) — asserting "no profiles
-                // matched" and offering "Last 24 hours" would misstate a
-                // query that never ran.
-                { message: 'No query selected.' }
+              ? settlingQuery
+                ? // Still a startup gap — the `loading` prop above already
+                  // swaps this out for the Loading placeholder, but keep the
+                  // claim from being wrong even momentarily. See
+                  // SingleView's identical gate.
+                  undefined
+                : // No usable query on this pane means no fetch was ever sent
+                  // (see SingleView's identical gate) — asserting "no profiles
+                  // matched" and offering "Last 24 hours" would misstate a
+                  // query that never ran.
+                  { message: 'No query selected.' }
               : {
                   message: FLAMEGRAPH_EMPTY_MESSAGE,
                   action: isLast24h(from, until)
@@ -102,6 +122,7 @@ function PaneFlamegraph({
 export function ComparisonView({
   services,
   servicesLoading,
+  servicesSettled,
   query,
   from,
   until,
@@ -111,6 +132,12 @@ export function ComparisonView({
   const { left, right } = useComparisonParams(query, range);
   const { params } = useRoute();
   const maxNodes = parseMaxNodes(params.get('maxNodes'));
+  // See SingleView's identical `settlingQuery` and queryLang.ts's
+  // `defaultQueryPending`: true while the main query hasn't resolved to
+  // something real yet, computed once here and handed to both panes rather
+  // than each rederiving it from `services`/the raw `query` param.
+  const queryStartupGap =
+    !servicesSettled || defaultQueryPending(services, params.get('query'));
 
   return (
     <div className="app-content">
@@ -144,6 +171,7 @@ export function ComparisonView({
           mainRange={range}
           mainFrom={from}
           tenantID={tenantID}
+          queryStartupGap={queryStartupGap}
         >
           <PaneFlamegraph
             pane={left}
@@ -151,6 +179,7 @@ export function ComparisonView({
             from={from}
             until={until}
             maxNodes={maxNodes}
+            queryStartupGap={queryStartupGap}
           />
         </ComparisonPane>
         <ComparisonPane
@@ -159,6 +188,7 @@ export function ComparisonView({
           mainRange={range}
           mainFrom={from}
           tenantID={tenantID}
+          queryStartupGap={queryStartupGap}
         >
           <PaneFlamegraph
             pane={right}
@@ -166,6 +196,7 @@ export function ComparisonView({
             from={from}
             until={until}
             maxNodes={maxNodes}
+            queryStartupGap={queryStartupGap}
           />
         </ComparisonPane>
       </div>

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Empty } from '@components/core/Empty';
+import { Loading } from '@components/core/Loading';
 import { profileTypeUnit } from '@api/client';
 import {
   axisTicks,
@@ -40,11 +41,19 @@ export function MultiTimeSeries({
   profileTypeId,
   startMs,
   endMs,
+  loading,
 }: {
   series: NamedSeries[];
   profileTypeId: string;
   startMs: number;
   endMs: number;
+  /**
+   * Whether the fetch behind `series` is still in flight. Only swaps the
+   * chart out for a loading placeholder when there's no series to show
+   * yet — once series exist, a refresh keeps drawing them, per AGENTS.md
+   * ("a retry shows the previous answer while reloading").
+   */
+  loading?: boolean;
 }) {
   const durationMs = endMs - startMs;
 
@@ -79,6 +88,13 @@ export function MultiTimeSeries({
       ),
     [series, startMs, durationMs, unit, displayMax],
   );
+
+  // A fetch in flight with nothing to draw yet reads as broken rather than
+  // busy if this renders nothing (or jumps straight to Empty) — see
+  // TimeSeries's identical placeholder for the single-series chart. Checked
+  // before the Empty fallback below so a slow fetch doesn't flash "no data"
+  // first.
+  if (loading && series.length === 0) return <Loading />;
 
   if (series.length === 0 || durationMs <= 0) return <Empty />;
 

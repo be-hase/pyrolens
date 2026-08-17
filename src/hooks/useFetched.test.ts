@@ -352,6 +352,78 @@ describe('useFetched', () => {
     await waitFor(() => assert.equal(result.current.fetchError, 'boom-2'));
   });
 
+  it('reports settled as false until the first run completes, true after a success', async () => {
+    // A startup gate ("has the first answer arrived yet") reads `settled`,
+    // not `fetching` — see the header comment.
+    let settle!: (value: string) => void;
+    const { result } = renderHook(() =>
+      useFetched(
+        'initial',
+        true,
+        () => new Promise<string>((resolve) => (settle = resolve)),
+        ['a'],
+      ),
+    );
+    assert.equal(result.current.settled, false);
+
+    settle('first');
+    await waitFor(() => assert.equal(result.current.data, 'first'));
+    assert.equal(result.current.settled, true);
+  });
+
+  it('reports settled as true once the first run completes with a failure', async () => {
+    // A run that fails is still a completed run — the caller has an answer
+    // (an error), not nothing.
+    const { result } = renderHook(() =>
+      useFetched<string>(
+        'initial',
+        true,
+        async () => {
+          throw new Error('boom');
+        },
+        ['a'],
+      ),
+    );
+    assert.equal(result.current.settled, false);
+    await waitFor(() => assert.equal(result.current.fetchError, 'boom'));
+    assert.equal(result.current.settled, true);
+  });
+
+  it('keeps settled true across a key change and refetch, even while the new key is still in flight', async () => {
+    // The whole point of `settled`: a caller that gates a startup placeholder
+    // on it must not see that gate re-open on a later, ordinary refetch (a
+    // deps change, an auto-refresh tick).
+    let settleA!: (value: string) => void;
+    let settleB!: (value: string) => void;
+    const { result, rerender } = renderHook(
+      ({ q }) =>
+        useFetched(
+          'initial',
+          true,
+          () =>
+            new Promise<string>((resolve) => {
+              if (q === 'a') settleA = resolve;
+              else settleB = resolve;
+            }),
+          [q],
+        ),
+      { initialProps: { q: 'a' } },
+    );
+    assert.equal(result.current.settled, false);
+    settleA('a-data');
+    await waitFor(() => assert.equal(result.current.data, 'a-data'));
+    assert.equal(result.current.settled, true);
+
+    rerender({ q: 'b' });
+    // Still in flight for the new key — settled must stay true throughout.
+    await waitFor(() => assert.equal(result.current.fetching, true));
+    assert.equal(result.current.settled, true);
+
+    settleB('b-data');
+    await waitFor(() => assert.equal(result.current.data, 'b-data'));
+    assert.equal(result.current.settled, true);
+  });
+
   it('returns a referentially stable retry function across rerenders', async () => {
     // The lead's contract requires this so a downstream effect can sit
     // `retry` in its deps without churning on every render.

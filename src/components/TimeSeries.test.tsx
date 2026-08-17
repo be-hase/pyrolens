@@ -1,4 +1,4 @@
-import { act, fireEvent, render } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it, vi } from 'vitest';
 import { TimeSeries } from './TimeSeries.tsx';
@@ -168,6 +168,52 @@ describe('TimeSeries drag-to-select', () => {
       onRangeSelect.mock.calls.length,
       0,
       'onRangeSelect must not fire from pixels dragged against a width that has since changed',
+    );
+  });
+});
+
+describe('TimeSeries loading placeholder', () => {
+  it('shows the loading indicator instead of a canvas while loading with no data yet', () => {
+    stubbedWidth = 100;
+    const { container } = render(
+      <TimeSeries
+        data={[]}
+        timeRange="now-1h"
+        profileTypeId={PROFILE_TYPE}
+        startMs={1_700_000_000_000}
+        endMs={1_700_000_100_000}
+        loading
+      />,
+    );
+    assert.ok(
+      screen.getByText('Loading…'),
+      'expected the Loading placeholder while loading with no data',
+    );
+    assert.ok(
+      !container.querySelector('canvas'),
+      'no canvas should be drawn while the loading placeholder is shown',
+    );
+  });
+
+  it('keeps rendering the chart, not the loading indicator, when data is already present', () => {
+    stubbedWidth = 100;
+    const { container } = render(
+      <TimeSeries
+        data={[{ timestamp: 1_700_000_050_000, value: 5 }]}
+        timeRange="now-1h"
+        profileTypeId={PROFILE_TYPE}
+        startMs={1_700_000_000_000}
+        endMs={1_700_000_100_000}
+        loading
+      />,
+    );
+    assert.ok(
+      container.querySelector('canvas'),
+      'the chart must keep rendering over existing data even while a refresh is in flight',
+    );
+    assert.ok(
+      !screen.queryByText('Loading…'),
+      'the loading placeholder must not replace a chart that already has data',
     );
   });
 });

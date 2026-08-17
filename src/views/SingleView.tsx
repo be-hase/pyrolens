@@ -8,7 +8,7 @@ import { TimeSeries } from '@components/TimeSeries';
 import { useFlamegraph, useTimeline } from '@hooks/useProfileData';
 import { useEditBuffer } from '@hooks/useEditBuffer';
 import { parseMaxNodes, profileTypeLabel } from '@api/client';
-import { parseQuery, splitQuery } from '../queryLang';
+import { defaultQueryPending, parseQuery, splitQuery } from '../queryLang';
 import { formatRangeLabel } from '../time';
 import { navigate, useRoute } from '../urlState';
 import { ErrorBanner } from './ComparisonPane';
@@ -28,6 +28,7 @@ function isLast24h(from: string, until: string): boolean {
 export function SingleView({
   services,
   servicesLoading,
+  servicesSettled,
   query,
   from,
   until,
@@ -52,6 +53,20 @@ export function SingleView({
     retries.length > 0 ? () => retries.forEach((r) => r()) : undefined;
   const { profileTypeID } = splitQuery(query);
   const parsed = parseQuery(query);
+  // Startup gap: App writes the default `query` param only after the
+  // services fetch settles (see App.tsx), so before that `profileTypeID` is
+  // empty because no query has been selected yet — not because one was
+  // asked and matched nothing. Treated as loading, not as the "no query
+  // selected" conclusion. Two windows, both false conclusions if missed:
+  // before the services fetch has ever settled (`!servicesSettled` — using
+  // `servicesLoading` here would re-open on every later auto-refresh tick,
+  // see useServices), and after it settles with a default write due but not
+  // yet landed in the URL (`defaultQueryPending` — effects run post-paint,
+  // so there is a render in between with nothing in flight and no query
+  // yet).
+  const settlingQuery =
+    (!servicesSettled || defaultQueryPending(services, params.get('query'))) &&
+    !profileTypeID;
 
   const [draft, setDraft] = useEditBuffer(query);
 
@@ -89,6 +104,7 @@ export function SingleView({
           profileTypeId={profileTypeID}
           startMs={range.start}
           endMs={range.end}
+          loading={tl.loading || settlingQuery}
           onRangeSelect={(start, end) =>
             navigate({ set: { from: String(start), until: String(end) } })
           }
@@ -142,7 +158,7 @@ export function SingleView({
         <FlameGraph
           data={fg.flamegraph}
           profileTypeId={profileTypeID}
-          loading={fg.loading}
+          loading={fg.loading || settlingQuery}
           // Suppressed while fg has its own error: the banner above already
           // explains it, and offering "no profiles matched" plus an action
           // that widens the range would misstate a fetch failure as an
@@ -151,12 +167,19 @@ export function SingleView({
             fg.error
               ? undefined
               : !profileTypeID
-                ? // No usable query means no fetch was ever sent (see
-                  // useProfileData.ts), so "no profiles matched this query"
-                  // would assert a result for a query that never ran — and
-                  // "Last 24 hours" cannot fix a missing query. Same gate the
-                  // Compare/Diff actions above already use.
-                  { message: 'No query selected.' }
+                ? settlingQuery
+                  ? // Still a startup gap (see `settlingQuery` above) — the
+                    // `loading` prop already swaps this out for the Loading
+                    // placeholder, so this value is inert, but leaving it
+                    // undefined keeps the claim from being wrong even
+                    // momentarily.
+                    undefined
+                  : // No usable query means no fetch was ever sent (see
+                    // useProfileData.ts), so "no profiles matched this query"
+                    // would assert a result for a query that never ran — and
+                    // "Last 24 hours" cannot fix a missing query. Same gate the
+                    // Compare/Diff actions above already use.
+                    { message: 'No query selected.' }
                 : {
                     message: FLAMEGRAPH_EMPTY_MESSAGE,
                     action: isLast24h(from, until)

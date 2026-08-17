@@ -12,10 +12,11 @@ import {
   type Service,
 } from '@api/client';
 import { ErrorBoundary } from '@components/ErrorBoundary';
+import { Loading } from '@components/core/Loading';
 import { NavBar } from '@components/NavBar';
 import { TenantDialog } from '@components/TenantDialog';
 import { useServices } from '@hooks/useServices';
-import { buildQuery } from './queryLang';
+import { buildQuery, defaultQueryPending } from './queryLang';
 import { readStorage, writeStorage } from './storage';
 import {
   DEFAULT_FROM,
@@ -34,6 +35,13 @@ import { TagExplorerView } from './views/TagExplorerView';
 export interface ViewProps {
   services: Service[];
   servicesLoading: boolean;
+  /**
+   * True once the services fetch has completed at least once since mount —
+   * see useServices/useFetched. Views use this (via `defaultQueryPending`,
+   * queryLang.ts) to gate startup-only placeholders instead of
+   * `servicesLoading`, which pulses true again on every auto-refresh tick.
+   */
+  servicesSettled: boolean;
   /** Query selector from the `query` URL param ('' when unset). */
   query: string;
   /** Raw `from` URL value: relative ("now-1h") or unix milliseconds. */
@@ -197,6 +205,7 @@ export function App() {
   const {
     services,
     servicesLoading,
+    servicesSettled,
     error: servicesError,
   } = useServices({
     range,
@@ -206,8 +215,13 @@ export function App() {
 
   // No query in the URL yet: default to the first service and its preferred
   // profile type, written back into the URL (replace, so Back still works).
+  // `queryDefaultDue` is the exact condition under which this write fires —
+  // shared with every view's startup-gap flag (defaultQueryPending,
+  // queryLang.ts) so neither side can drift from what this effect actually
+  // does.
+  const queryDefaultDue = defaultQueryPending(services, rawQuery);
   useEffect(() => {
-    if (!ready || rawQuery !== null || services.length === 0) return;
+    if (!ready || !queryDefaultDue) return;
     const first = services[0];
     const profileType = sortProfileTypes(first.profileTypes)[0];
     if (!profileType) return;
@@ -215,7 +229,7 @@ export function App() {
       set: { query: buildQuery(first.name, profileType) },
       replace: true,
     });
-  }, [ready, rawQuery, services]);
+  }, [ready, queryDefaultDue, services]);
 
   return (
     <div className="app">
@@ -236,6 +250,12 @@ export function App() {
           </p>
           {probeError && <p className="app-error-detail">{probeError}</p>}
         </div>
+      ) : status === 'checking' ? (
+        // The one probe on load (checkMultitenancy) hasn't settled yet, so
+        // there is neither an error nor a view to show — rendering nothing
+        // here used to leave the content area blank for as long as the probe
+        // took, reading as a broken page rather than one that's working.
+        <Loading />
       ) : (
         ready && (
           <>
@@ -249,6 +269,7 @@ export function App() {
               <View
                 services={services}
                 servicesLoading={servicesLoading}
+                servicesSettled={servicesSettled}
                 query={query}
                 from={from}
                 until={until}

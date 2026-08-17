@@ -41,6 +41,17 @@
   display: block;
 }
 
+/* Stands in for the canvas (100px) + its 2px margin + the x-axis (18px)
+   while there's no data to draw yet, so switching in and out of the loading
+   placeholder doesn't move anything else in the panel. Loading's own
+   min-height already happens to total 120px (border-box, see theme.css),
+   matching the chart's footprint above; this rule pins that on purpose
+   rather than leaving it as a coincidence a future edit to either file could
+   quietly break. */
+.timeseries-loading {
+  min-height: 120px;
+}
+
 .timeseries-x-axis {
   position: relative;
   height: 18px;

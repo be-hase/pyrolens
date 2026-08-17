@@ -55,6 +55,7 @@ export function ComparisonPane({
   mainRange,
   mainFrom,
   tenantID,
+  queryStartupGap,
   children,
 }: {
   title: string;
@@ -62,6 +63,19 @@ export function ComparisonPane({
   mainRange: TimeRange;
   mainFrom: string;
   tenantID?: string;
+  /**
+   * Whether the main query hasn't resolved to something real yet — either
+   * the top-level services fetch (ViewProps.servicesSettled) has never
+   * settled, or it has and App's default-query write is due but hasn't
+   * landed in the URL yet (queryLang.ts's `defaultQueryPending`). Before
+   * that, an inheriting pane's `profileTypeID` is empty because there is no
+   * query yet — not because nothing matched. See `settlingQuery` below.
+   * Renamed from `servicesLoading`: that flag pulsed true on every
+   * auto-refresh tick (see useServices), which flipped an already-settled,
+   * honestly empty pane back into a spinner on every tick — the caller now
+   * computes this once from `settled` state instead.
+   */
+  queryStartupGap?: boolean;
   children?: React.ReactNode;
 }) {
   const { timeline, loading, error, retry } = useTimeline({
@@ -70,6 +84,7 @@ export function ComparisonPane({
     tenantID,
   });
   const { profileTypeID } = splitQuery(pane.query);
+  const settlingQuery = !!queryStartupGap && !profileTypeID;
 
   const [draft, setDraft] = useEditBuffer(pane.query);
 
@@ -142,6 +157,7 @@ export function ComparisonPane({
           startMs={mainRange.start}
           endMs={mainRange.end}
           selection={pane.range}
+          loading={loading || settlingQuery}
           onRangeSelect={(start, end) =>
             navigate({
               set: {

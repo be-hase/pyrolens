@@ -102,3 +102,30 @@ export function formatCell(value: number, unit: string): string {
   const display = toDisplayValue(value, unit);
   return yAxisFormatter(niceMax(display))(display);
 }
+
+/**
+ * Whether the Timeline/Breakdown pipeline is still working toward its first
+ * conclusion, for the stage before `groupBy` has a value — as opposed to
+ * concluded (settled) with an answer, even an honestly empty one.
+ *
+ * `groupBy` empty is not just "no labels fetched yet": TagExplorerView's own
+ * default-groupBy effect (a passive effect, so it runs one render after the
+ * commit that landed a non-empty `labelsData`) is about to write one the
+ * moment the labels fetch settles with a non-empty list. Reporting "settled"
+ * in the render before that write lands would paint "No profiles matched" /
+ * "No data available" for one frame that the effect immediately corrects.
+ *
+ * So this stays true for as long as such a write is still coming
+ * (`!labelsSettled`, or `labelsSettled` with a non-empty list) and only goes
+ * false once either `groupBy` is actually set, or the labels fetch has
+ * settled with nothing to group by — the one case where no write is ever
+ * coming and the empty conclusion is the honest, final answer.
+ */
+export function breakdownSettingUp(
+  hasQuery: boolean,
+  groupBy: string,
+  labelsSettled: boolean,
+  labelsCount: number,
+): boolean {
+  return hasQuery && !groupBy && (!labelsSettled || labelsCount > 0);
+}

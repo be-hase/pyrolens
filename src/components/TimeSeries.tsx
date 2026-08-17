@@ -6,6 +6,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import tinycolor from 'tinycolor2';
+import { Loading } from '@components/core/Loading';
 import { profileTypeUnit, type Point } from '@api/client';
 import type { TimeRange } from '../time';
 import {
@@ -66,6 +67,7 @@ export function TimeSeries({
   endMs,
   selection,
   onRangeSelect,
+  loading,
 }: {
   /** Timeline points: `timestamp` unix ms, `value` in the profile's unit. */
   data: Point[];
@@ -78,6 +80,13 @@ export function TimeSeries({
   selection?: TimeRange;
   /** Called with unix-ms bounds after a drag selection. */
   onRangeSelect?: (startMs: number, endMs: number) => void;
+  /**
+   * Whether the fetch behind `data` is still in flight. Only swaps the
+   * chart out for a loading placeholder when there's no data to show yet —
+   * once points exist, a refresh keeps drawing them, per AGENTS.md ("a
+   * retry shows the previous answer while reloading").
+   */
+  loading?: boolean;
 }) {
   const chartRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -331,6 +340,14 @@ export function TimeSeries({
 
   const pxToMs = (px: number) => xToTime(px, startMs, durationMs, width);
 
+  // No data to draw yet and a fetch is in flight: swap the canvas+axis out
+  // for a loading placeholder rather than an empty chart, which read as
+  // broken rather than busy. `chartRef` stays attached to the same element
+  // either way (only its children change) — the ResizeObserver effect below
+  // only ever constructs one observer, at mount, so it must find a live
+  // element there regardless of which branch happens to be showing.
+  const showLoadingPlaceholder = !!loading && data.length === 0;
+
   return (
     <div className="timeseries">
       <div className="timeseries-y-axis">
@@ -345,62 +362,71 @@ export function TimeSeries({
         ))}
       </div>
       <div ref={chartRef} className="timeseries-chart">
-        <canvas
-          ref={canvasRef}
-          className="timeseries-canvas"
-          onPointerDown={(e) => {
-            if (e.button !== 0 || !onRangeSelect) return;
-            e.currentTarget.setPointerCapture(e.pointerId);
-            const px = localX(e);
-            setDrag({ originX: px, currentX: px });
-          }}
-          onPointerMove={(e) => {
-            const px = localX(e);
-            setHoverX(px);
-            setDrag((d) => (d ? { ...d, currentX: px } : d));
-          }}
-          onPointerUp={() => {
-            if (!drag) return;
-            setDrag(null);
-            const a = Math.min(drag.originX, drag.currentX);
-            const b = Math.max(drag.originX, drag.currentX);
-            if (b - a < MIN_DRAG_PX) return;
-            const fromMs = pxToMs(a);
-            const untilMs = pxToMs(b);
-            // xToTime rounds to whole ms, so a drag past the pixel
-            // threshold can still land both ends on the same millisecond
-            // once the visible span is sub-second (a few brush-zooms deep).
-            // Selecting that would send from === until, which resolveRange
-            // (src/time.ts) silently replaces with a fabricated 1-hour
-            // window instead of failing loudly.
-            if (untilMs > fromMs) onRangeSelect?.(fromMs, untilMs);
-          }}
-          onPointerLeave={() => setHoverX(null)}
-          onPointerCancel={() => setDrag(null)}
-          onLostPointerCapture={() => setDrag(null)}
-        />
-        <div className="timeseries-x-axis">
-          {ticks.map((ts) => {
-            const pct = ((ts - startMs) / durationMs) * 100;
-            return (
-              <span
-                key={ts}
-                className="timeseries-x-label"
-                style={{
-                  left: `${pct}%`,
-                  transform:
-                    pct <= 0
-                      ? 'none'
-                      : pct >= 100
-                        ? 'translateX(-100%)'
-                        : 'translateX(-50%)',
-                }}
-              >
-                {formatTickTime(ts, stepMs)}
-              </span>
-            );
-          })}
-        </div>
+        {showLoadingPlaceholder ? (
+          <div className="timeseries-loading">
+            <Loading />
+          </div>
+        ) : (
+          <>
+            <canvas
+              ref={canvasRef}
+              className="timeseries-canvas"
+              onPointerDown={(e) => {
+                if (e.button !== 0 || !onRangeSelect) return;
+                e.currentTarget.setPointerCapture(e.pointerId);
+                const px = localX(e);
+                setDrag({ originX: px, currentX: px });
+              }}
+              onPointerMove={(e) => {
+                const px = localX(e);
+                setHoverX(px);
+                setDrag((d) => (d ? { ...d, currentX: px } : d));
+              }}
+              onPointerUp={() => {
+                if (!drag) return;
+                setDrag(null);
+                const a = Math.min(drag.originX, drag.currentX);
+                const b = Math.max(drag.originX, drag.currentX);
+                if (b - a < MIN_DRAG_PX) return;
+                const fromMs = pxToMs(a);
+                const untilMs = pxToMs(b);
+                // xToTime rounds to whole ms, so a drag past the pixel
+                // threshold can still land both ends on the same
+                // millisecond once the visible span is sub-second (a few
+                // brush-zooms deep). Selecting that would send
+                // from === until, which resolveRange (src/time.ts) silently
+                // replaces with a fabricated 1-hour window instead of
+                // failing loudly.
+                if (untilMs > fromMs) onRangeSelect?.(fromMs, untilMs);
+              }}
+              onPointerLeave={() => setHoverX(null)}
+              onPointerCancel={() => setDrag(null)}
+              onLostPointerCapture={() => setDrag(null)}
+            />
+            <div className="timeseries-x-axis">
+              {ticks.map((ts) => {
+                const pct = ((ts - startMs) / durationMs) * 100;
+                return (
+                  <span
+                    key={ts}
+                    className="timeseries-x-label"
+                    style={{
+                      left: `${pct}%`,
+                      transform:
+                        pct <= 0
+                          ? 'none'
+                          : pct >= 100
+                            ? 'translateX(-100%)'
+                            : 'translateX(-50%)',
+                    }}
+                  >
+                    {formatTickTime(ts, stepMs)}
+                  </span>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
