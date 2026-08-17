@@ -14,6 +14,7 @@ import {
   type Service,
 } from '@api/client';
 import { App } from './App.tsx';
+import { buildQuery } from './queryLang.ts';
 import { navigate } from './urlState.ts';
 import type { ViewProps } from './App.tsx';
 
@@ -116,6 +117,138 @@ describe('App tenancy', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
     await waitFor(() => assert.equal(params().get('tenant'), 'team-b'));
     assert.equal(localStorage.getItem('pyrolens:tenant'), 'team-b');
+  });
+
+  it('resets to the root view and clears every other param when switching to a different tenant', async () => {
+    // The old tenant's view, query, groupBy, pane overrides, fgSearch etc.
+    // name that tenant's world (its service names, its labels) and describe
+    // nothing about the new one, so a real switch must not carry them over.
+    multitenancyOf.mockResolvedValue(true);
+    // No services, so the default-query effect (queryDefaultDue) stays
+    // false once `query` is cleared and does not write one back in,
+    // which would otherwise race the assertions below.
+    servicesOf.mockResolvedValue([]);
+    at(
+      '/explore?tenant=team-a&query=%7B%7D&from=now-1h&groupBy=region&fgSearch=foo',
+    );
+    render(<App />);
+    await waitFor(() => assert.equal(seen('tenant'), 'team-a'));
+
+    const pushSpy = vi.spyOn(window.history, 'pushState');
+    const replaceSpy = vi.spyOn(window.history, 'replaceState');
+
+    fireEvent.click(screen.getByTitle('Change tenant'));
+    const input = await screen.findByRole('textbox');
+    fireEvent.change(input, { target: { value: 'team-b' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+
+    await waitFor(() => assert.equal(seen('tenant'), 'team-b'));
+    assert.equal(window.location.pathname, '/');
+    assert.deepEqual([...params().keys()], ['tenant']);
+    assert.equal(params().get('tenant'), 'team-b');
+    // Back must recover the previous tenant's full context, so the switch
+    // has to be a push, not a replace.
+    assert.equal(pushSpy.mock.calls.length, 1);
+    assert.equal(replaceSpy.mock.calls.length, 0);
+  });
+
+  it('resubmitting the current tenant closes the dialog without navigating', async () => {
+    // Not a Run: even a no-op navigate() would advance "now" and refire
+    // every fetch, which a cancel-shaped action must not do.
+    multitenancyOf.mockResolvedValue(true);
+    at('/?tenant=team-a&query=%7B%7D&from=now-1h');
+    render(<App />);
+    await waitFor(() => assert.equal(seen('tenant'), 'team-a'));
+    await waitFor(() => assert.ok(servicesOf.mock.calls.length > 0));
+    const fetchCountBefore = servicesOf.mock.calls.length;
+
+    const pushSpy = vi.spyOn(window.history, 'pushState');
+    const replaceSpy = vi.spyOn(window.history, 'replaceState');
+    const before = window.location.href;
+
+    fireEvent.click(screen.getByTitle('Change tenant'));
+    // The dialog reopens pre-filled with the current tenant; resubmit as-is.
+    await screen.findByRole('textbox');
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+
+    await waitFor(() => assert.ok(!screen.queryByRole('dialog')));
+    assert.equal(window.location.href, before);
+    assert.equal(pushSpy.mock.calls.length, 0);
+    assert.equal(replaceSpy.mock.calls.length, 0);
+    assert.equal(servicesOf.mock.calls.length, fetchCountBefore);
+  });
+
+  it('preserves params on the initial tenant pick from a deep link', async () => {
+    // A deep link to a multi-tenant instance carries params meant for the
+    // tenant about to be entered, so the first dialog must not destroy them.
+    multitenancyOf.mockResolvedValue(true);
+    at('/explore?query=%7B%7D&from=now-1h&groupBy=region');
+    render(<App />);
+    await waitFor(() => assert.ok(screen.getByRole('dialog')));
+
+    const replaceSpy = vi.spyOn(window.history, 'replaceState');
+    const pushSpy = vi.spyOn(window.history, 'pushState');
+    const input = await screen.findByRole('textbox');
+    fireEvent.change(input, { target: { value: 'team-a' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+
+    await waitFor(() => assert.equal(seen('tenant'), 'team-a'));
+    assert.equal(params().get('tenant'), 'team-a');
+    assert.equal(params().get('query'), '{}');
+    assert.equal(params().get('from'), 'now-1h');
+    assert.equal(params().get('groupBy'), 'region');
+    assert.equal(pushSpy.mock.calls.length, 0);
+    assert.ok(replaceSpy.mock.calls.length > 0);
+  });
+
+  it('does not default the new tenant into the old tenant service list while its own is still loading', async () => {
+    // The reset clears `query`, so the default-query effect is due the
+    // instant the switch lands. `services` is stale-while-refetching
+    // (useFetched), so right then it still holds team-a's list while
+    // team-b's fetch is in flight — writing from it would default team-b
+    // into a service that named team-a's world.
+    multitenancyOf.mockResolvedValue(true);
+    at('/?tenant=team-a&query=%7B%7D');
+
+    const SERVICE_A: Service = {
+      name: 'checkout',
+      profileTypes: ['a:cpu:c:d:e'],
+    };
+    const SERVICE_B: Service = {
+      name: 'billing',
+      profileTypes: ['b:cpu:c:d:e'],
+    };
+    let resolveB!: (services: Service[]) => void;
+    const pendingB = new Promise<Service[]>((resolve) => {
+      resolveB = resolve;
+    });
+    servicesOf
+      .mockResolvedValueOnce([SERVICE_A])
+      .mockImplementationOnce(() => pendingB);
+
+    render(<App />);
+    // team-a's list has to be in (the stale value the switch will leave
+    // behind) before the switch happens.
+    await waitFor(() => assert.equal(seen('services'), 'checkout'));
+
+    fireEvent.click(screen.getByTitle('Change tenant'));
+    const input = await screen.findByRole('textbox');
+    fireEvent.change(input, { target: { value: 'team-b' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+
+    await waitFor(() => assert.equal(seen('tenant'), 'team-b'));
+    // team-b's fetch is still pending: no default may be written yet, from
+    // team-a's stale list or anything else.
+    assert.equal(params().get('query'), null);
+
+    await act(async () => {
+      resolveB([SERVICE_B]);
+      await pendingB;
+    });
+
+    await waitFor(() =>
+      assert.equal(params().get('query'), buildQuery('billing', 'b:cpu:c:d:e')),
+    );
   });
 
   it('explains an unreachable server instead of rendering a view', async () => {

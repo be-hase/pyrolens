@@ -84,8 +84,31 @@ test('the tenant is remembered for the next visit', async ({ page }) => {
 });
 
 test('switching tenants re-queries under the new one', async ({ page }) => {
-  await page.goto(`/?tenant=${meta.tenant}`);
+  // The old tenant's view/query/from/until describe that tenant's world, so
+  // a real switch must reset the URL down to the root view with just the
+  // new tenant, not carry them over onto a tenant they don't describe.
+  const params = new URLSearchParams({
+    tenant: meta.tenant,
+    query: meta.query,
+    from: String(meta.window.start),
+    until: String(meta.window.end),
+  });
+  await page.goto(`/explore?${params}`);
   await expect(page.getByRole('button', { name: meta.tenant })).toBeVisible();
+
+  // Captured via the navigation events themselves, not sampled from
+  // `page.url()` after the fact: the tenant-only URL the reset produces is
+  // transient — once team-b's own services fetch settles (the default-query
+  // effect deliberately waits for it rather than firing from team-a's stale
+  // list; see App.tsx), a fresh query is replace-written back in. Against
+  // the local fake that round-trip is fast enough that sampling afterwards
+  // races it; listening for each navigation as it lands does not.
+  const navigatedUrls: URL[] = [];
+  page.on('framenavigated', (frame) => {
+    if (frame === page.mainFrame()) {
+      navigatedUrls.push(new URL(frame.url()));
+    }
+  });
 
   await page.getByRole('button', { name: meta.tenant }).click();
   const dialog = page.getByRole('dialog', { name: 'Enter a Tenant ID' });
@@ -93,6 +116,18 @@ test('switching tenants re-queries under the new one', async ({ page }) => {
   await dialog.getByRole('button', { name: 'Submit' }).click();
 
   await expect(page).toHaveURL(/tenant=team-b/);
+  await expect
+    .poll(() =>
+      navigatedUrls.some((url) => {
+        const p = url.searchParams;
+        return (
+          url.pathname === '/' &&
+          [...p.keys()].length === 1 &&
+          p.get('tenant') === 'team-b'
+        );
+      }),
+    )
+    .toBe(true);
   await expect
     .poll(async () =>
       (await upstreamLog(page)).some((entry) => entry.tenant === 'team-b'),

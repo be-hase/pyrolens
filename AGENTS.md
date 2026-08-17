@@ -161,6 +161,15 @@ fine in a quick test.
   `popstate` and `pyroscope:navigate` calls `setTenant()` before any effect
   runs, so nothing can be requested against the previous tenant. Do not move
   it into a component.
+- **Switching tenant resets to `/?tenant=...`.** The old tenant's view,
+  query, groupBy, pane overrides and the rest describe that tenant's world —
+  its service names, its labels — and mean nothing against the new one, so a
+  real switch clears every param and pathname down to the root view with
+  only the new `tenant` set. The one exception is the initial pick (no
+  tenant yet): a deep link to a multi-tenant instance carries params meant
+  for the tenant about to be entered, so those are kept. The reset is a
+  push, not a replace, so Back restores the previous tenant with its full
+  context — view included — intact.
 
 ### Fetching
 
