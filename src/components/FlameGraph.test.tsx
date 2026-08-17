@@ -1,12 +1,25 @@
 import { render, screen } from '@testing-library/react';
 import assert from 'node:assert/strict';
-import { describe, it } from 'vitest';
+import { describe, it, vi } from 'vitest';
 import {
   flameGraphUrlState,
   sandwichNavigateOptions,
   searchNavigateOptions,
 } from '@hooks/useFlameGraphUrlState';
 import { FlameGraph } from './FlameGraph.tsx';
+
+// The reload-dim tests below need the data-present branch to render without
+// throwing — the real vendored FlameGraph needs a canvas 2D context jsdom
+// doesn't provide (see the file comment below). Stubbing it out keeps this
+// suite scoped to what it owns: whether `.flamegraph-wrapper` carries the
+// reload-dim classes, not the vendored component's own rendering.
+vi.mock('@lib/flamegraph', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@lib/flamegraph')>();
+  return {
+    ...actual,
+    FlameGraph: () => <div data-testid="grafana-flamegraph-stub" />,
+  };
+});
 
 // The wrapper's actual JSX renders the vendored flame graph, which needs a
 // real canvas context to mount without throwing — jsdom does not provide
@@ -30,6 +43,9 @@ import { FlameGraph } from './FlameGraph.tsx';
 
 const PROFILE_TYPE = 'process_cpu:cpu:nanoseconds:cpu:nanoseconds';
 const NO_FRAMES = { names: [], levels: [] };
+// One root bar: gap 0, width 100, own time 50, name index 0 — enough for
+// flamebearerToDataFrame to return a truthy frame (see flamebearer.test.ts).
+const ONE_FRAME = { names: ['root'], levels: [[0, 100, 50, 0]] };
 
 describe('FlameGraph loading placeholder', () => {
   it('shows the loading indicator, not Empty, while a fetch is in flight with no frames yet', () => {
@@ -61,6 +77,37 @@ describe('FlameGraph loading placeholder', () => {
     assert.ok(
       !screen.queryByText('Loading…'),
       'the loading indicator must not render once the fetch has settled',
+    );
+  });
+});
+
+describe('FlameGraph reload dim', () => {
+  it('dims the wrapper while a fetch is in flight over frames already on screen', () => {
+    const { container } = render(
+      <FlameGraph data={ONE_FRAME} profileTypeId={PROFILE_TYPE} loading />,
+    );
+    const wrapper = container.querySelector('.flamegraph-wrapper');
+    assert.ok(wrapper, 'expected the flamegraph-wrapper to render');
+    assert.ok(
+      wrapper.classList.contains('reload-dim') &&
+        wrapper.classList.contains('active'),
+      'expected the wrapper to carry the reload-dim active class while loading over existing frames',
+    );
+  });
+
+  it('does not dim the wrapper once the fetch has settled', () => {
+    const { container } = render(
+      <FlameGraph
+        data={ONE_FRAME}
+        profileTypeId={PROFILE_TYPE}
+        loading={false}
+      />,
+    );
+    const wrapper = container.querySelector('.flamegraph-wrapper');
+    assert.ok(wrapper, 'expected the flamegraph-wrapper to render');
+    assert.ok(
+      !wrapper.classList.contains('active'),
+      'the wrapper must not carry the active dim class once loading is false',
     );
   });
 });

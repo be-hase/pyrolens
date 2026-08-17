@@ -361,7 +361,18 @@ export function TimeSeries({
           </span>
         ))}
       </div>
-      <div ref={chartRef} className="timeseries-chart">
+      <div
+        ref={chartRef}
+        className={
+          // Dims the stale chart while a refresh is in flight over data
+          // that's already on screen — the complement of
+          // showLoadingPlaceholder above, which only applies when there's
+          // nothing to dim yet. See Loading.css for the class.
+          loading && data.length > 0
+            ? 'timeseries-chart reload-dim active'
+            : 'timeseries-chart reload-dim'
+        }
+      >
         {showLoadingPlaceholder ? (
           <div className="timeseries-loading">
             <Loading />

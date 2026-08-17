@@ -46,7 +46,17 @@ export function FlameGraph({
 
   if (frame) {
     return (
-      <div className="flamegraph-wrapper">
+      <div
+        className={
+          // Dims the stale flame graph while a refresh is in flight over
+          // frames already on screen — the complement of the `loading`
+          // placeholder below, which only applies when there are no frames
+          // yet. See Loading.css for the class.
+          loading
+            ? 'flamegraph-wrapper reload-dim active'
+            : 'flamegraph-wrapper reload-dim'
+        }
+      >
         <GrafanaFlameGraph
           data={frame}
           vertical={vertical}

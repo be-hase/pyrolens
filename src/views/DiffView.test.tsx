@@ -25,6 +25,19 @@ class StubResizeObserver {
   disconnect() {}
 }
 
+// The reload-dim tests below need the diff panel's dataFrame-present branch
+// to render without throwing — the real vendored FlameGraph needs a canvas
+// 2D context jsdom doesn't provide (see FlameGraph.test.tsx's identical
+// stub). Every other test in this file only ever resolves empty diff data,
+// so this has no effect on them.
+vi.mock('@lib/flamegraph', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@lib/flamegraph')>();
+  return {
+    ...actual,
+    FlameGraph: () => <div data-testid="grafana-flamegraph-stub" />,
+  };
+});
+
 const diffOf = vi.mocked(fetchDiffFlamegraph);
 const timelineOf = vi.mocked(fetchTimeline);
 
@@ -185,6 +198,57 @@ describe('DiffView loading placeholder', () => {
         2,
         'expected both pane timelines (Baseline and Comparison) to show the loading indicator',
       ),
+    );
+  });
+});
+
+describe('DiffView reload dim', () => {
+  // Diff wire shape: one string per bar field, seven per bar (gap/width/own
+  // for each side, then the name index) — see flamebearer.test.ts's `diff`
+  // helper. Left side carries the whole bar, right side zeroed.
+  const ONE_FRAME = {
+    names: ['root'],
+    levels: [{ values: ['0', '100', '50', '0', '0', '0', '0'] }],
+  };
+
+  it('dims the diff flamegraph wrapper while a refetch is in flight over frames already on screen', async () => {
+    diffOf.mockResolvedValueOnce(ONE_FRAME);
+    const { container, rerender } = render(<DiffView {...PROPS} />);
+    await waitFor(() =>
+      assert.ok(container.querySelector('.flamegraph-wrapper')),
+    );
+
+    // A range tick (see AGENTS.md: "now" advances on every navigation)
+    // refires the diff fetch under the same queries while the previous
+    // frames are still on screen — hold this one pending so `loading` stays
+    // true with `diff` still non-null.
+    diffOf.mockReturnValue(new Promise(() => {}));
+    rerender(
+      <DiffView {...PROPS} range={{ start: 2_000_000, end: 5_600_000 }} />,
+    );
+    await waitFor(() => assert.equal(diffOf.mock.calls.length, 2));
+
+    const wrapper = container.querySelector('.flamegraph-wrapper');
+    assert.ok(wrapper, 'expected the flamegraph-wrapper to still render');
+    assert.ok(
+      wrapper.classList.contains('reload-dim') &&
+        wrapper.classList.contains('active'),
+      'expected the wrapper to carry the reload-dim active class while a refetch is in flight over existing frames',
+    );
+  });
+
+  it('does not dim the diff flamegraph wrapper once the fetch has settled', async () => {
+    diffOf.mockResolvedValue(ONE_FRAME);
+    const { container } = render(<DiffView {...PROPS} />);
+    await waitFor(() =>
+      assert.ok(container.querySelector('.flamegraph-wrapper')),
+    );
+
+    const wrapper = container.querySelector('.flamegraph-wrapper');
+    assert.ok(wrapper, 'expected the flamegraph-wrapper to render');
+    assert.ok(
+      !wrapper.classList.contains('active'),
+      'the wrapper must not carry the active dim class once the fetch has settled',
     );
   });
 });
