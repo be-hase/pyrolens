@@ -38,6 +38,9 @@ archives:
     files:
       - README.md
       - LICENSE
+      # The bundle is minified with comments stripped, so the third-party
+      # copyright/permission notices ride here instead.
+      - THIRD-PARTY-NOTICES.md
 
 checksum:
   name_template: checksums.txt
@@ -91,6 +94,12 @@ dockers_v2:
       - linux/amd64
       - linux/arm64
     dockerfile: Dockerfile.release
+    # Copied into /licenses in the image; the notices file is what carries
+    # the bundled third-party attributions (the minified UI bundle strips
+    # its license comments).
+    extra_files:
+      - LICENSE
+      - THIRD-PARTY-NOTICES.md
     labels:
       org.opencontainers.image.title: '{{ .ProjectName }}'
       org.opencontainers.image.version: '{{ .Version }}'

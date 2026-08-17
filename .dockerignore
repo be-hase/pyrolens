@@ -20,5 +20,7 @@ e2e
 dev
 .github
 *.md
-LICENSE
 main_test.go
+# ...except the two files the final stage COPYs into /licenses — the
+# minified UI bundle strips license comments, so these carry the notices.
+!THIRD-PARTY-NOTICES.md

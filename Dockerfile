@@ -19,5 +19,8 @@ LABEL org.opencontainers.image.title="Pyrolens" \
       org.opencontainers.image.source="https://github.com/be-hase/pyrolens" \
       org.opencontainers.image.licenses="Apache-2.0"
 COPY --from=server /pyrolens /pyrolens
+# Same /licenses as the release image (Dockerfile.release): the minified UI
+# bundle strips its license comments, so the attributions ride here.
+COPY LICENSE THIRD-PARTY-NOTICES.md /licenses/
 EXPOSE 4041
 ENTRYPOINT ["/pyrolens"]
