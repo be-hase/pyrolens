@@ -290,4 +290,7 @@ gh attestation verify pyrolens_<version>_linux_amd64.tar.gz --owner be-hase
 ## License
 
 Pyrolens is licensed **Apache-2.0** (see `LICENSE`). Bundled third-party
-code retains its own license file alongside the code.
+code retains its own license file alongside the code, and
+`THIRD-PARTY-NOTICES.md` collects every bundled component's copyright and
+permission notice — it ships in the release archives and at `/licenses` in
+the container image, since the minified UI bundle strips license comments.
