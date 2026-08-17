@@ -54,9 +54,16 @@ export function DiffView({
     maxNodes,
   });
 
-  const unit = grafanaUnit(
-    profileTypeUnit(splitQuery(left.query).profileTypeID),
-  );
+  const leftType = splitQuery(left.query).profileTypeID;
+  const rightType = splitQuery(right.query).profileTypeID;
+  // The upstream Diff RPC assumes both sides sample the same profile type;
+  // useDiffFlamegraph refuses to fetch when they differ (see its comment),
+  // so `diff` stays null and this must explain why nothing rendered instead
+  // of falling through to the generic "no profiles matched" placeholder,
+  // which would misstate a request that was never sent as an empty result.
+  const typeMismatch = !!leftType && !!rightType && leftType !== rightType;
+
+  const unit = grafanaUnit(profileTypeUnit(leftType));
   const dataFrame = useMemo(
     () => (diff ? diffFlamebearerToDataFrame(diff, unit) : undefined),
     [diff, unit],
@@ -67,7 +74,26 @@ export function DiffView({
   // identical reasoning for rendering nothing rather than a second,
   // redundant message. And no contextual claim while the banner already
   // shows this fetch's error — see FlameGraph's identical gate.
-  const diffEmpty = loading ? null : (
+  const diffEmpty = loading ? null : typeMismatch ? (
+    <Empty
+      message={
+        `Baseline queries profile type "${leftType}" and Comparison ` +
+        `queries "${rightType}". Diff needs both panes to query the same ` +
+        'profile type.'
+      }
+      action={{
+        label: 'Match Comparison to Baseline',
+        // Write left's raw override, not its resolved query — left.query is
+        // leftQuery ?? mainQuery, so when left has no override this would
+        // materialize the main query into rightQuery and permanently detach
+        // the right pane from later main-query edits. left.queryOverride is
+        // null when left inherits, and navigate's `set` deletes a param on
+        // null, so the right pane goes back to inheriting too; when left is
+        // overridden, the right pane picks up that same override string.
+        onClick: () => navigate({ set: { rightQuery: left.queryOverride } }),
+      }}
+    />
+  ) : (
     <Empty message={error ? undefined : DIFF_EMPTY_MESSAGE} />
   );
 

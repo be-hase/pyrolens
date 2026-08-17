@@ -329,6 +329,65 @@ describe('useLabelSuggestions', () => {
     );
   });
 
+  it('does not stick with stale values when the replacement fetch fails', async () => {
+    // Same race as the names test above, but for the values effect: the
+    // render that changes the pool key resets `values` and commits
+    // synchronously, while this effect's cleanup (`controller.abort()`)
+    // only runs at the later passive-effect flush. A tenant-1 response
+    // that finishes parsing in that gap sees `aborted === false`. Unlike
+    // names, the values effect always re-fetches on the next tenant/range/
+    // label — the question is whether that replacement fetch rejecting
+    // leaves the stale write stuck forever.
+    const first = deferred<string[]>();
+    valuesOf.mockReturnValueOnce(first.promise);
+    valuesOf.mockRejectedValueOnce(new Error('down'));
+
+    const { result, rerender } = renderHook(
+      (p: { tenantID: string }) =>
+        useLabelSuggestions({
+          text: '{region="',
+          caret: 9,
+          start: RANGE.start,
+          end: RANGE.end,
+          tenantID: p.tenantID,
+          enabled: true,
+        }),
+      { initialProps: { tenantID: 't1' } },
+    );
+    await flush();
+    assert.equal(valuesOf.mock.calls.length, 1);
+
+    const abortSpy = vi
+      .spyOn(AbortController.prototype, 'abort')
+      .mockImplementation(() => {});
+    try {
+      rerender({ tenantID: 't2' });
+      await act(async () => {});
+    } finally {
+      abortSpy.mockRestore();
+    }
+
+    assert.equal(valuesOf.mock.calls.length, 2, 'tenant 2 was fetched');
+    assert.deepEqual(
+      result.current.suggestions,
+      [],
+      'tenant-2 fetch rejected; nothing should have landed yet',
+    );
+
+    // The tenant-1 fetch finally resolves, with `signal.aborted` still
+    // false because abort() was neutered above.
+    await act(async () => {
+      first.settle(['eu-west', 'us-east']);
+      await first.promise;
+    });
+
+    assert.deepEqual(
+      result.current.suggestions,
+      [],
+      'must not be clobbered by the superseded tenant-1 response',
+    );
+  });
+
   it('survives a failed lookup with an empty list', async () => {
     namesOf.mockRejectedValueOnce(new Error('down'));
     const { result } = setup({ text: '{', caret: 1 });

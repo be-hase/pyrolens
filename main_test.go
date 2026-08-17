@@ -346,13 +346,12 @@ func TestResolvePyroscopeAuth(t *testing.T) {
 // exclusion Fatalf main enforces at the call site.
 func TestResolveTenantControl(t *testing.T) {
 	cases := []struct {
-		name       string
-		pinFlag    string
-		allowFlag  string
-		wantErr    string // substring; "" means no error is expected
-		wantPin    string
-		wantAllow  map[string]bool
-		wantAllowN bool // true if allowed must be non-nil even when empty
+		name      string
+		pinFlag   string
+		allowFlag string
+		wantErr   string // substring; "" means no error is expected
+		wantPin   string
+		wantAllow map[string]bool
 	}{
 		{
 			name: "neither set: no tenant control at all",
@@ -378,10 +377,34 @@ func TestResolveTenantControl(t *testing.T) {
 			wantAllow: map[string]bool{"tenant-a": true, "tenant-b": true},
 		},
 		{
-			name:       "a list of only empty entries yields an empty, non-nil set",
-			allowFlag:  " , ,",
-			wantAllow:  map[string]bool{},
-			wantAllowN: true,
+			// Every element trims to "" and is skipped, which would otherwise
+			// leave newHandler holding a non-nil empty map -- its gate is keyed
+			// on allowedTenants != nil, so an empty map 403s every inbound
+			// tenant. Same shape as the whitespace-only pin below: an error,
+			// not a silent allow-nothing.
+			name:      "a list of only empty entries is an error, not a silent allow-nothing",
+			allowFlag: " , ,",
+			wantErr:   "-allowed-tenants",
+		},
+		{
+			name:      "a lone comma is an error, not a silent allow-nothing",
+			allowFlag: ",",
+			wantErr:   "-allowed-tenants",
+		},
+		{
+			name:      "whitespace only is an error, not a silent allow-nothing",
+			allowFlag: " ",
+			wantErr:   "-allowed-tenants",
+		},
+		{
+			name:      "whitespace around a lone comma is an error, not a silent allow-nothing",
+			allowFlag: " , ",
+			wantErr:   "-allowed-tenants",
+		},
+		{
+			name:      "a valid list with a trailing comma still works",
+			allowFlag: "a,b,",
+			wantAllow: map[string]bool{"a": true, "b": true},
 		},
 		{
 			name:      "both set: contradiction",
@@ -426,7 +449,7 @@ func TestResolveTenantControl(t *testing.T) {
 			if pin != c.wantPin {
 				t.Errorf("pin: got %q, want %q", pin, c.wantPin)
 			}
-			if c.wantAllow == nil && !c.wantAllowN {
+			if c.wantAllow == nil {
 				if allowed != nil {
 					t.Errorf("allowed: got %v, want nil", allowed)
 				}

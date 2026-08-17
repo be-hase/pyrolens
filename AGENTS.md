@@ -211,8 +211,11 @@ fine in a quick test.
   through a ref — an effect keyed on `range` re-registered on every
   auto-refresh tick and disarmed the sequence being typed.
 - **The clipboard is untrusted, asynchronous input.** `t v` parses strictly
-  and applies a settled read only if the URL still equals the one captured
-  at dispatch — a tick passes, a real navigation discards, with no timing
+  and applies a settled read only if its destination still matches what was
+  captured at dispatch: the path, the range params it overwrites, and the
+  tenant/query context it lands in — not the whole URL, or a background
+  replace (the flame graph search's debounce) discards a paste the user
+  expects to land. A tick passes, a real navigation discards, with no timing
   window. The parse rules and their reasons live on `parseClipboardTimeValue`
   and `pasteRange`.
 - `navigator.clipboard` exists only in secure contexts; writes fall back

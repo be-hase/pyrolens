@@ -86,13 +86,40 @@ export function TimeSeries({
   const [drag, setDrag] = useState<DragState | null>(null);
   const [themeTick, setThemeTick] = useState(0);
 
-  // Drop transient pointer state when the time anchor changes (render-time
-  // adjustment, same pattern as the views' query-draft buffers).
+  // Drop transient pointer state when the mapping it was captured under
+  // changes (render-time adjustment, same pattern as the views' query-draft
+  // buffers) — but `drag` and `hoverX` reset on different keys, because only
+  // one of them has stale pixel semantics baked in. `drag` stores raw pixel
+  // coordinates that pointer-up converts through whatever `startMs`/
+  // `durationMs`/`width` are current at that moment (`pxToMs` closes over
+  // all three), so a change to any of them reinterprets the drag against a
+  // mapping the user never saw — the raw `timeRange` string alone is not
+  // enough, since for a relative range it stays byte-identical across an
+  // auto-refresh tick while the resolved startMs/endMs move underneath it,
+  // and the ResizeObserver can fire mid-drag independently of either.
+  // `hoverX` carries no such baked-in mapping: it is a bare pixel position
+  // re-projected fresh every render against the current window, so it only
+  // needs to reset on a genuine re-anchor (`timeRange` itself changing) —
+  // resetting it on every resolved-bounds tick as well would blank the
+  // crosshair out from under a pointer that never moved, on every
+  // auto-refresh of a relative range.
   const [prevTimeRange, setPrevTimeRange] = useState(timeRange);
-  if (prevTimeRange !== timeRange) {
+  const [prevStartMs, setPrevStartMs] = useState(startMs);
+  const [prevEndMs, setPrevEndMs] = useState(endMs);
+  const [prevWidth, setPrevWidth] = useState(width);
+  const timeRangeChanged = prevTimeRange !== timeRange;
+  if (
+    timeRangeChanged ||
+    prevStartMs !== startMs ||
+    prevEndMs !== endMs ||
+    prevWidth !== width
+  ) {
     setPrevTimeRange(timeRange);
+    setPrevStartMs(startMs);
+    setPrevEndMs(endMs);
+    setPrevWidth(width);
     setDrag(null);
-    setHoverX(null);
+    if (timeRangeChanged) setHoverX(null);
   }
 
   const durationMs = Math.max(1, endMs - startMs);
@@ -337,7 +364,16 @@ export function TimeSeries({
             setDrag(null);
             const a = Math.min(drag.originX, drag.currentX);
             const b = Math.max(drag.originX, drag.currentX);
-            if (b - a >= MIN_DRAG_PX) onRangeSelect?.(pxToMs(a), pxToMs(b));
+            if (b - a < MIN_DRAG_PX) return;
+            const fromMs = pxToMs(a);
+            const untilMs = pxToMs(b);
+            // xToTime rounds to whole ms, so a drag past the pixel
+            // threshold can still land both ends on the same millisecond
+            // once the visible span is sub-second (a few brush-zooms deep).
+            // Selecting that would send from === until, which resolveRange
+            // (src/time.ts) silently replaces with a fabricated 1-hour
+            // window instead of failing loudly.
+            if (untilMs > fromMs) onRangeSelect?.(fromMs, untilMs);
           }}
           onPointerLeave={() => setHoverX(null)}
           onPointerCancel={() => setDrag(null)}

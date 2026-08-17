@@ -16,6 +16,7 @@ import { NavBar } from '@components/NavBar';
 import { TenantDialog } from '@components/TenantDialog';
 import { useServices } from '@hooks/useServices';
 import { buildQuery } from './queryLang';
+import { readStorage, writeStorage } from './storage';
 import {
   DEFAULT_FROM,
   DEFAULT_UNTIL,
@@ -114,11 +115,11 @@ export function App() {
   const { key: activeView, View } = VIEWS[path] ?? DEFAULT_VIEW;
 
   const [theme, setTheme] = useState<Theme>(() =>
-    localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark',
+    readStorage(THEME_KEY) === 'light' ? 'light' : 'dark',
   );
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem(THEME_KEY, theme);
+    writeStorage(THEME_KEY, theme);
   }, [theme]);
 
   // One probe on load decides single- vs multi-tenant (or "server is down").
@@ -159,7 +160,7 @@ export function App() {
   }, [status, tenant]);
 
   // Tenant remembered from the previous visit (read once at app load).
-  const [storedTenant] = useState(() => localStorage.getItem(TENANT_KEY));
+  const [storedTenant] = useState(() => readStorage(TENANT_KEY));
 
   // URL without a tenant but one remembered: adopt it, writing it into the
   // URL (replace) so the address stays the single source of truth.
@@ -171,7 +172,7 @@ export function App() {
 
   // Remember the active tenant for the next visit.
   useEffect(() => {
-    if (status === 'multi' && tenant) localStorage.setItem(TENANT_KEY, tenant);
+    if (status === 'multi' && tenant) writeStorage(TENANT_KEY, tenant);
   }, [status, tenant]);
 
   const showTenantDialog =

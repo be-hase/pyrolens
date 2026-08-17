@@ -802,6 +802,15 @@ func resolveTenantControl(pinFlag, allowedFlag string) (pin string, allowed map[
 			allowed[tenant] = true
 		}
 	}
+	// newHandler's gate activates on allowedTenants != nil, not on it being
+	// non-empty, so a value that is only separators/whitespace (",", " ",
+	// " , ") would silently produce a non-nil EMPTY map here — every
+	// non-empty inbound X-Scope-OrgID then fails the (empty) allowlist and
+	// gets 403'd. Same failure mode as the whitespace-only pin above: a
+	// startup error beats a silent lockout.
+	if len(allowed) == 0 {
+		return "", nil, fmt.Errorf("-allowed-tenants contains no usable tenant IDs, only separators/whitespace; left as-is this would silently deny every tenant instead of allowing none")
+	}
 	return "", allowed, nil
 }
 
