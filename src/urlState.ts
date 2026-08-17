@@ -94,6 +94,60 @@ export function navigate(opts: NavigateOptions): void {
   window.dispatchEvent(new Event(NAV_EVENT));
 }
 
+/**
+ * Params whose value only changes how already-fetched data is rendered —
+ * never what is fetched or what is sent to the server. A param may be added
+ * here ONLY under that condition: no fetch and no server request may depend
+ * on it. Listing a data-relevant param here silently kills refresh for it —
+ * a fetch keyed on it would go stale and never be told to re-run.
+ */
+export const VIEW_ONLY_PARAMS: ReadonlySet<string> = new Set([
+  'fgSearch', // flame graph search filter, applied client-side (useFlameGraphUrlState)
+  'fgSandwich', // flame graph sandwich focus, applied client-side (useFlameGraphUrlState)
+  'sort', // Tag Explorer table sort, applied client-side (sortRows, TagExplorerView)
+]);
+
+interface UrlLike {
+  pathname: string;
+  search: string;
+}
+
+/** Keys whose value differs between two query strings, multi-value aware. */
+function changedParamKeys(prevSearch: string, nextSearch: string): Set<string> {
+  const prev = new URLSearchParams(prevSearch);
+  const next = new URLSearchParams(nextSearch);
+  const changed = new Set<string>();
+  for (const key of new Set([...prev.keys(), ...next.keys()])) {
+    const prevValues = prev.getAll(key);
+    const nextValues = next.getAll(key);
+    const same =
+      prevValues.length === nextValues.length &&
+      prevValues.every((v, i) => v === nextValues[i]);
+    if (!same) changed.add(key);
+  }
+  return changed;
+}
+
+/**
+ * Whether a navigation from `prev` to `next` should advance the frozen "now"
+ * snapshot App.tsx resolves relative ranges against (and so refire every
+ * range-keyed fetch). A pathname change is always a real navigation. A
+ * search-param diff of nothing is also a real navigation — that is what
+ * makes Run/an auto-refresh tick a real refresh for a relative range, and
+ * must not regress. Otherwise it advances unless every changed key (added,
+ * removed, or value-changed) is in `VIEW_ONLY_PARAMS` — filtering data
+ * that's already on screen is not a refresh.
+ */
+export function advancesNow(prev: UrlLike, next: UrlLike): boolean {
+  if (prev.pathname !== next.pathname) return true;
+  const changed = changedParamKeys(prev.search, next.search);
+  if (changed.size === 0) return true;
+  for (const key of changed) {
+    if (!VIEW_ONLY_PARAMS.has(key)) return true;
+  }
+  return false;
+}
+
 /** Intercepts plain left-clicks on internal links so they use pushState. */
 export function onLinkClick(
   opts: NavigateOptions,

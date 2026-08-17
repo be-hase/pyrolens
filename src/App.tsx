@@ -24,7 +24,7 @@ import {
   resolveRange,
   type TimeRange,
 } from './time';
-import { navigate, useRoute } from './urlState';
+import { advancesNow, navigate, useRoute } from './urlState';
 import { ComparisonView } from './views/ComparisonView';
 import { DiffView } from './views/DiffView';
 import { SingleView } from './views/SingleView';
@@ -88,15 +88,34 @@ window.addEventListener('popstate', syncTenantFromUrl);
 window.addEventListener('pyroscope:navigate', syncTenantFromUrl);
 
 // "Now" used to resolve relative time ranges. It advances on every
-// navigation — including a Run that leaves the URL unchanged, so pressing
-// Run always re-resolves a relative range and refetches — and stays
-// constant between navigations so renders are pure.
+// navigation except one whose only change is a view-only param
+// (VIEW_ONLY_PARAMS in urlState.ts, e.g. the flame graph search) — that
+// includes a Run that leaves the URL unchanged, so pressing Run always
+// re-resolves a relative range and refetches, but excludes a write that only
+// changes how already-fetched data is rendered, which is not a refresh. It
+// stays constant between navigations so renders are pure.
 let nowCache = Date.now();
 let nowVersion = 0;
 let nowSeenVersion = 0;
+// The URL as of the last navigate/popstate event, so bumpNow can diff
+// against it. Updated on every event regardless of the decision below, or
+// the next event would be diffed against a stale prev and could wrongly
+// look like a no-op (empty diff -> advance) or wrongly absorb a real change
+// into an already-seen one.
+let prevNavUrl = {
+  pathname: window.location.pathname,
+  search: window.location.search,
+};
 
 function bumpNow(): void {
-  nowVersion += 1;
+  const nextNavUrl = {
+    pathname: window.location.pathname,
+    search: window.location.search,
+  };
+  if (advancesNow(prevNavUrl, nextNavUrl)) {
+    nowVersion += 1;
+  }
+  prevNavUrl = nextNavUrl;
 }
 window.addEventListener('popstate', bumpNow);
 window.addEventListener('pyroscope:navigate', bumpNow);

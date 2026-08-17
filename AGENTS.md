@@ -129,14 +129,20 @@ fine in a quick test.
   unanchored they survived the URL moving underneath — App writing the
   default query in mid-typing — and the popup then spliced a suggestion into
   the new text at an offset that meant something else entirely.
-- **"Now" advances on every navigation, including one that changes nothing.**
-  That is what makes Run a real refresh for a relative range. It is a cached
-  snapshot read through `useSyncExternalStore`, so renders stay pure; do not
-  call `Date.now()` during render to paper over staleness.
-- **Every param write is therefore also a refresh** — groupBy, sort and
-  search commits all refire relative-range fetches, so typed input never
-  writes per keystroke: keep a local draft and debounce one
-  replace-navigation per burst (the flame graph search is the model).
+- **"Now" advances on every navigation, including one that changes nothing —
+  except one whose only change is a view-only param.** That is what makes Run
+  a real refresh for a relative range. A write that touches only
+  `VIEW_ONLY_PARAMS` (`urlState.ts`: `fgSearch`, `fgSandwich`, `sort`) does
+  not advance it and does not refire fetches — filtering data already on
+  screen is not a refresh, but a no-op navigation (Run, an auto-refresh tick)
+  still is. It is a cached snapshot read through `useSyncExternalStore`, so
+  renders stay pure; do not call `Date.now()` during render to paper over
+  staleness.
+- **Every other param write is therefore also a refresh** — groupBy commits
+  refire relative-range fetches, so typed input never writes per keystroke:
+  keep a local draft and debounce one replace-navigation per burst (the
+  flame graph search is the model, even though its own write is now
+  view-only and does not itself refetch).
 - **When two components write the same param, each may publish only once its
   debounce has settled on its own draft.** The Comparison panes share
   `fgSearch`; a writer that navigated on any draft/URL mismatch ping-ponged

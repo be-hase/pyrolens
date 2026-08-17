@@ -262,6 +262,42 @@ describe('App defaults', () => {
     assert.equal(seen('range'), '1799996460000-1800000060000');
   });
 
+  it('does not advance "now" or refetch for a view-only param write (fgSearch), but still does for Run', async () => {
+    // The flame graph search filters already-fetched data client-side; it
+    // must not trigger a server refetch. Run (a no-op navigation) must still
+    // refetch — that invariant must not regress.
+    //
+    // Clock values are unique to this test: nowCache is module-level and
+    // shared across every test in this file, so a forced navigate({}) below
+    // (rather than trusting whatever a previous test left cached) is what
+    // pins "before" to this test's own mocked clock.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_950_000_000_000);
+    at('/?query=%7B%7D&from=now-1h&until=now');
+    render(<App />);
+    await waitFor(() => assert.ok(screen.getByTestId('single')));
+
+    act(() => navigate({}));
+    await waitFor(() =>
+      assert.equal(seen('range'), '1949996400000-1950000000000'),
+    );
+    const before = seen('range');
+    const callsBefore = servicesOf.mock.calls.length;
+
+    clock.mockReturnValue(1_950_000_060_000);
+    act(() => navigate({ set: { fgSearch: 'alloc' }, replace: true }));
+    await waitFor(() => assert.equal(params().get('fgSearch'), 'alloc'));
+
+    assert.equal(seen('range'), before);
+    assert.equal(servicesOf.mock.calls.length, callsBefore);
+
+    clock.mockReturnValue(1_950_000_120_000);
+    act(() => navigate({}));
+    await waitFor(() =>
+      assert.equal(seen('range'), '1949996520000-1950000120000'),
+    );
+    assert.ok(servicesOf.mock.calls.length > callsBefore);
+  });
+
   it('holds "now" still between navigations, so renders stay pure', async () => {
     const clock = vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
     at('/?query=%7B%7D');

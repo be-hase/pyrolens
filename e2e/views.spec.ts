@@ -284,6 +284,46 @@ test('typing into the flame graph search box writes fgSearch to the URL, and cle
     .toBeNull();
 });
 
+test('typing into the flame graph search filters client-side without a single upstream request', async ({
+  page,
+}) => {
+  // A RELATIVE range, deliberately: with the fixture's absolute window a
+  // wrongly advanced "now" changes no fetch key and this test could never
+  // fail. Relative is exactly the case where a view-only write used to
+  // refire everything. (The fake replays the fixture whatever window is
+  // asked for, so the view still renders.)
+  await page.goto(url('/', { from: 'now-1h', until: 'now' }));
+  const search = page.getByRole('textbox', { name: 'Search' });
+  await expect(search).toBeVisible();
+
+  // Let the initial load's requests finish landing before snapshotting the
+  // log: poll until its length holds still across two reads.
+  // -1, not 0: a first read of a still-empty log must not count as stable.
+  let settled = -1;
+  await expect
+    .poll(async () => {
+      const len = (await upstreamLog(page)).length;
+      if (len === settled) return 'stable';
+      settled = len;
+      return len;
+    })
+    .toBe('stable');
+
+  await search.fill('queryDatabase');
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get('fgSearch'), {
+      timeout: 5_000,
+    })
+    .toBe('queryDatabase');
+  // The fgSearch write is a view-only navigation (VIEW_ONLY_PARAMS in
+  // urlState.ts): it must not advance "now" and so must not refire the
+  // relative range's fetches. Give any wrongly issued request time to
+  // reach the fake before reading the log — an immediate read would pass
+  // against broken code that fires one a beat later.
+  await page.waitForTimeout(1_000);
+  expect((await upstreamLog(page)).length).toBe(settled);
+});
+
 test('the comparison view shares fgSearch across both panes', async ({
   page,
 }) => {

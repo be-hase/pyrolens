@@ -89,10 +89,11 @@ export function useFlameGraphUrlState(): {
   // this immediately, so highlighting inside the flame graph stays
   // keystroke-fast even though the URL write below is debounced.
   const [searchDraft, setSearchDraft] = useEditBuffer(fgSearch);
-  // Debounced trailing write: a URL write advances the frozen "now" (see
-  // App.tsx) and refires relative-range fetches, the same thing a groupBy
-  // or sort click already does, so writing on every keystroke would refetch
-  // the profile mid-typing. useDebouncedValue's own effect cleanup cancels
+  // Debounced trailing write. fgSearch is a view-only param (see
+  // VIEW_ONLY_PARAMS in urlState.ts), so its write no longer advances the
+  // frozen "now" or refires fetches — but per-keystroke writes would still
+  // flood the history's replace budget and re-render every URL subscriber,
+  // so the debounce stays. useDebouncedValue's own effect cleanup cancels
   // the pending write on unmount and restarts it whenever the draft changes
   // again, including when it changes back to what's already committed.
   const debouncedSearch = useDebouncedValue(searchDraft, SEARCH_DEBOUNCE_MS);
