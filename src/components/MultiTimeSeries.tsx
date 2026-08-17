@@ -152,7 +152,17 @@ export function MultiTimeSeries({
             </span>
           ))}
         </div>
-        <div className="timeseries-chart">
+        <div
+          className={
+            // Dims the stale chart while a refresh is in flight over series
+            // that are already on screen — the complement of the `loading
+            // && series.length === 0` placeholder above. See Loading.css
+            // for the class.
+            loading
+              ? 'timeseries-chart reload-dim active'
+              : 'timeseries-chart reload-dim'
+          }
+        >
           <svg
             viewBox={`0 0 ${W} ${H}`}
             preserveAspectRatio="none"

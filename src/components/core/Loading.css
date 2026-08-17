@@ -34,3 +34,38 @@
     animation: none;
   }
 }
+
+/* Reload-in-progress treatment: a chart or flame graph that already has data
+   on screen dims instead of being replaced while its fetch is in flight —
+   the stale-while-reloading rule (AGENTS.md) keeps the old render up, but a
+   silent unchanged chart reads as unresponsive on a slow Run/query/range
+   reload, and the panel meta's small "Loading…" is easy to miss. `.loading`
+   (above) is the complementary case: no data yet, so there is nothing to
+   dim and a placeholder swaps in instead.
+   The dimmed rule's delay (not the base rule's) is the point: a fast
+   auto-refresh tick flips `active` on and back off within the delay window,
+   so the opacity transition never starts and the chart doesn't flicker,
+   while a genuinely slow reload dims visibly. Snapping back to full opacity
+   when loading ends has no delay, so fresh data reads as immediately
+   current. */
+.reload-dim {
+  opacity: 1;
+  transition: opacity 0.15s ease;
+}
+
+.reload-dim.active {
+  opacity: 0.55;
+  transition: opacity 0.15s ease 0.25s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reload-dim {
+    transition: none;
+  }
+
+  .reload-dim.active {
+    /* Drop the animated fade but keep the delay — it is what absorbs a fast
+       auto-refresh tick without a visible flicker, independent of motion. */
+    transition: opacity 0s linear 0.25s;
+  }
+}

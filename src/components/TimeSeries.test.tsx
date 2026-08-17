@@ -218,6 +218,69 @@ describe('TimeSeries loading placeholder', () => {
   });
 });
 
+describe('TimeSeries reload dim', () => {
+  it('dims the chart container while a fetch is in flight over data already on screen', () => {
+    stubbedWidth = 100;
+    const { container } = render(
+      <TimeSeries
+        data={[{ timestamp: 1_700_000_050_000, value: 5 }]}
+        timeRange="now-1h"
+        profileTypeId={PROFILE_TYPE}
+        startMs={1_700_000_000_000}
+        endMs={1_700_000_100_000}
+        loading
+      />,
+    );
+    const chart = container.querySelector('.timeseries-chart');
+    assert.ok(chart, 'expected the chart container to render');
+    assert.ok(
+      chart.classList.contains('reload-dim') &&
+        chart.classList.contains('active'),
+      'expected the chart container to carry the reload-dim active class while loading over existing data',
+    );
+  });
+
+  it('does not dim the chart container once the fetch has settled', () => {
+    stubbedWidth = 100;
+    const { container } = render(
+      <TimeSeries
+        data={[{ timestamp: 1_700_000_050_000, value: 5 }]}
+        timeRange="now-1h"
+        profileTypeId={PROFILE_TYPE}
+        startMs={1_700_000_000_000}
+        endMs={1_700_000_100_000}
+        loading={false}
+      />,
+    );
+    const chart = container.querySelector('.timeseries-chart');
+    assert.ok(chart, 'expected the chart container to render');
+    assert.ok(
+      !chart.classList.contains('active'),
+      'the chart container must not carry the active dim class once loading is false',
+    );
+  });
+
+  it('does not dim the loading placeholder itself (loading with no data yet)', () => {
+    stubbedWidth = 100;
+    const { container } = render(
+      <TimeSeries
+        data={[]}
+        timeRange="now-1h"
+        profileTypeId={PROFILE_TYPE}
+        startMs={1_700_000_000_000}
+        endMs={1_700_000_100_000}
+        loading
+      />,
+    );
+    const chart = container.querySelector('.timeseries-chart');
+    assert.ok(chart, 'expected the chart container to render');
+    assert.ok(
+      !chart.classList.contains('active'),
+      'the placeholder-showing container must not carry the active dim class',
+    );
+  });
+});
+
 describe('TimeSeries hover crosshair', () => {
   // jsdom's canvas has no real 2D context (getContext returns null without
   // installing the `canvas` package), so the component's draw effect is

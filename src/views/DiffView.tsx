@@ -170,7 +170,17 @@ export function DiffView({
         meta={diffLoading ? 'Loading…' : undefined}
       >
         {dataFrame ? (
-          <div className="flamegraph-wrapper">
+          <div
+            className={
+              // Dims the stale diff flame graph while a refresh is in
+              // flight over frames already on screen — the complement of
+              // diffEmpty's Loading branch above, which only applies when
+              // there's no dataFrame yet. See Loading.css for the class.
+              diffLoading
+                ? 'flamegraph-wrapper reload-dim active'
+                : 'flamegraph-wrapper reload-dim'
+            }
+          >
             <GrafanaFlameGraph
               data={dataFrame}
               search={search}
