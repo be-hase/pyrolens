@@ -1,7 +1,13 @@
 import { act, renderHook } from '@testing-library/react';
 import assert from 'node:assert/strict';
 import { beforeEach, describe, it, vi } from 'vitest';
-import { buildUrl, navigate, onLinkClick, useRoute } from './urlState.ts';
+import {
+  advancesNow,
+  buildUrl,
+  navigate,
+  onLinkClick,
+  useRoute,
+} from './urlState.ts';
 
 beforeEach(() => {
   window.history.replaceState(null, '', '/');
@@ -198,5 +204,88 @@ describe('onLinkClick', () => {
     onLinkClick({ path: '/diff' })(e);
     assert.equal(e.preventDefault.mock.calls.length, 0);
     assert.equal(window.location.pathname, '/');
+  });
+});
+
+describe('advancesNow', () => {
+  const at = (pathname: string, search: string) => ({ pathname, search });
+
+  it('treats a pathname change as a real navigation', () => {
+    assert.equal(
+      advancesNow(at('/', '?query=a'), at('/diff', '?query=a')),
+      true,
+    );
+  });
+
+  it('treats a no-op navigation (same path, same params) as a real refresh', () => {
+    // This is what makes Run/an auto-refresh tick a real refresh for a
+    // relative range — it must not regress.
+    assert.equal(
+      advancesNow(
+        at('/', '?query=a&from=now-1h'),
+        at('/', '?query=a&from=now-1h'),
+      ),
+      true,
+    );
+  });
+
+  it('does not advance for an fgSearch-only add', () => {
+    assert.equal(
+      advancesNow(at('/', '?query=a'), at('/', '?query=a&fgSearch=x')),
+      false,
+    );
+  });
+
+  it('does not advance for an fgSearch-only value change', () => {
+    assert.equal(
+      advancesNow(
+        at('/', '?query=a&fgSearch=x'),
+        at('/', '?query=a&fgSearch=y'),
+      ),
+      false,
+    );
+  });
+
+  it('does not advance for an fgSearch-only removal', () => {
+    assert.equal(
+      advancesNow(at('/', '?query=a&fgSearch=x'), at('/', '?query=a')),
+      false,
+    );
+  });
+
+  it('advances when fgSearch changes alongside a data-relevant param', () => {
+    assert.equal(
+      advancesNow(
+        at('/', '?query=a&fgSearch=x&from=now-1h'),
+        at('/', '?query=a&fgSearch=y&from=now-6h'),
+      ),
+      true,
+    );
+  });
+
+  it('does not advance for a sort-only change', () => {
+    assert.equal(
+      advancesNow(
+        at('/explore', '?query=a'),
+        at('/explore', '?query=a&sort=avg'),
+      ),
+      false,
+    );
+  });
+
+  it('advances for a groupBy-only change (not view-only)', () => {
+    assert.equal(
+      advancesNow(
+        at('/explore', '?query=a&groupBy=region'),
+        at('/explore', '?query=a&groupBy=host'),
+      ),
+      true,
+    );
+  });
+
+  it('treats a value-count change on a multi-valued param as a real change', () => {
+    // Same key, same set of values, different multiplicity — a naive
+    // set-based diff would miss this.
+    assert.equal(advancesNow(at('/', '?tag=a'), at('/', '?tag=a&tag=a')), true);
   });
 });
