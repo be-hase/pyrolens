@@ -10,10 +10,8 @@ self-contained binary / Docker image.
 
 ![Single view](docs/screenshots/single-dark.png)
 
-**Works with Pyroscope v1 (tested: v1.21.1) and v2 (tested: v2.2.1).** The UI
-only speaks the `querier.v1.QuerierService` API, which both major versions
-serve, in both single-tenant and multi-tenant (`-auth.multitenancy-enabled`)
-setups.
+**Works with Pyroscope v1 (tested: v1.21.1) and v2 (tested: v2.2.1)**, in
+both single-tenant and multi-tenant (`-auth.multitenancy-enabled`) setups.
 
 Pyroscope 2.0 replaced its embedded UI with a minimal viewer and moved the
 full analysis experience into Grafana (Profiles Drilldown). This project
@@ -21,28 +19,24 @@ brings the classic workflow back, plus a few things the old UI never had:
 
 - **Everything is in the URL.** Tenant, query, time ranges, comparison
   selections, group-by label — copy the address bar and a teammate sees the
-  exact same screen. (The classic UI kept the tenant out of the URL, which
-  made sharing queries in multi-tenant setups painful.)
-- **First-class multi-tenancy.** The tenant is a `tenant` URL param sent as
-  `X-Scope-OrgID`; switch tenants from the nav bar. No per-tenant data
-  sources to manage.
+  exact same screen.
+- **First-class multi-tenancy.** Switch tenants from the nav bar; the tenant
+  rides along in shared links. No per-tenant data sources to manage.
 - **Comparison view** colors frames by package-name hash, so the same
   function has the same color in both panes. **Diff view** shows the classic
   green/red differential flame graph (color-blind palette available).
-- **One-click baselines.** The Single view's flamegraph panel has "Compare
-  vs previous" / "Diff vs previous" buttons that jump straight into
-  Comparison/Diff with an equal-duration window immediately before the
-  current range already filled in. Comparison and Diff both have a "Swap
-  sides" button to flip which window is the baseline.
-- **Pane windows are never a guess.** Each Comparison/Diff pane's header
-  shows the time window it actually resolved to, marked "first half" /
-  "second half" while it's still the implicit default; brushing or
-  deep-linking a window adds a "Reset window" button back to that default.
+- **One-click baselines.** "Compare vs previous" / "Diff vs previous" jump
+  from Single straight into Comparison/Diff with an equal-duration window
+  immediately before the current range already filled in; "Swap sides" flips
+  which window is the baseline.
+- **Pane windows are never a guess.** Each Comparison/Diff pane header shows
+  the window it actually resolved to, and offers "Reset window" once you've
+  brushed away from the default.
 
 ## The views
 
-**Diff** — what got slower between two windows, ranked. Here an extra
-`slowRegression` frame shows up as `+33.57%`.
+**Diff** — what got slower between two windows, ranked. Here the injected
+`slowRegression` frame jumps out at `+1023%`, red in the flame graph.
 
 ![Diff view](docs/screenshots/diff-dark.png)
 
@@ -73,77 +67,46 @@ PYROSCOPE_URL=http://pyroscope.example:4040 make run
 ```
 
 The binary and the image are the same thing: one self-contained server with
-the UI embedded, no runtime dependencies.
-
-Flags / env of the server binary:
-
-| Flag                        | Env                       | Default                 |                         |
-| --------------------------- | ------------------------- | ------------------------ | ----------------------- |
-| `-listen`                   | `LISTEN`                  | `:4041`                 | address to listen on    |
-| `-pyroscope-url`            | `PYROSCOPE_URL`           | `http://localhost:4040` | Pyroscope server to use |
-| `-pyroscope-username`       | `PYROSCOPE_USERNAME`      | —                        | basic auth username for the Pyroscope server |
-| `-pyroscope-password`       | `PYROSCOPE_PASSWORD`      | —                        | basic auth password for the Pyroscope server |
-| `-pyroscope-password-file`  | `PYROSCOPE_PASSWORD_FILE` | —                        | path to a file holding the basic auth password (for a mounted secret); mutually exclusive with `-pyroscope-password` |
-| `-pyroscope-tenant-id`      | `PYROSCOPE_TENANT_ID`     | —                        | pin the outbound tenant to this ID on every request, overriding whatever the visitor sent; mutually exclusive with `-allowed-tenants` |
-| `-allowed-tenants`          | `ALLOWED_TENANTS`         | —                        | comma-separated tenant IDs to allow; a non-empty tenant outside this list is rejected with 403 before reaching Pyroscope; mutually exclusive with `-pyroscope-tenant-id` |
-| `-log-requests`             | `LOG_REQUESTS`            | `false`                  | log one line per request (method, path, status, duration, bytes, and the tenant header for querier calls) |
-| `-version`                  | —                         | —                        | print the version and exit |
-
-The server embeds the built SPA and reverse-proxies
-`/querier.v1.QuerierService/*` to the Pyroscope server, so the browser talks
-to a single origin and your Pyroscope server never needs CORS or direct
-exposure. That one prefix is the whole query API the UI uses; nothing else is
-forwarded, so Pyroscope's ingest and admin endpoints are not reachable
+the UI embedded. It reverse-proxies only the exact querier RPCs the UI
+calls (all under `/querier.v1.QuerierService/`) to your Pyroscope server,
+so the browser talks to a single origin — Pyroscope needs no CORS and no
+direct exposure, and its ingest and admin endpoints are not reachable
 through pyrolens.
 
-The embedded assets are served gzip-compressed whenever the browser accepts
-it — no flag needed, it's automatic.
+## Configuration
+
+| Flag                       | Env                       | Default                 |                                                                                                                      |
+| -------------------------- | ------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `-listen`                  | `LISTEN`                  | `:4041`                 | address to listen on                                                                                                  |
+| `-pyroscope-url`           | `PYROSCOPE_URL`           | `http://localhost:4040` | Pyroscope server to use                                                                                               |
+| `-pyroscope-username`      | `PYROSCOPE_USERNAME`      | —                       | basic auth username for the Pyroscope server                                                                          |
+| `-pyroscope-password`      | `PYROSCOPE_PASSWORD`      | —                       | basic auth password for the Pyroscope server                                                                          |
+| `-pyroscope-password-file` | `PYROSCOPE_PASSWORD_FILE` | —                       | path to a file holding the basic auth password (for a mounted secret); mutually exclusive with `-pyroscope-password`  |
+| `-pyroscope-tenant-id`     | `PYROSCOPE_TENANT_ID`     | —                       | pin every outbound request to this tenant, overriding whatever the visitor sent; mutually exclusive with `-allowed-tenants` |
+| `-allowed-tenants`         | `ALLOWED_TENANTS`         | —                       | comma-separated tenant IDs to allow; any other non-empty tenant is rejected with 403; mutually exclusive with `-pyroscope-tenant-id` |
+| `-log-requests`            | `LOG_REQUESTS`            | `false`                 | log one line per request (method, path, status, duration, bytes, and the tenant for querier calls)                    |
+| `-version`                 | —                         | —                       | print the version and exit                                                                                            |
 
 ### Authenticated upstreams (Grafana Cloud)
 
 If the Pyroscope behind pyrolens requires basic auth — Grafana Cloud's
 hosted Pyroscope does, with the stack ID as the username and an API token as
-the password — give it credentials one of two ways:
+the password — give it credentials either embedded in the URL
+(`https://user:pass@host`) or via the `-pyroscope-username` /
+`-pyroscope-password` / `-pyroscope-password-file` flags. Flags win over the
+URL's userinfo entirely, username and password must come from the same
+source, and half-configured auth refuses to start rather than silently
+sending unauthenticated requests.
 
-- Embed them in `-pyroscope-url` (`https://user:pass@host`), or
-- Set `-pyroscope-username` / `-pyroscope-password` (or
-  `-pyroscope-password-file` for a mounted secret) explicitly.
-
-**The username and password must come from the same source.** Setting any
-of `-pyroscope-username`/`-pyroscope-password`/`-pyroscope-password-file`
-makes those flags win over the URL's userinfo *entirely* — pyrolens does not
-combine a flag-sourced credential with a URL-sourced one (a URL username
-plus a file-sourced password, say). `-pyroscope-password` and
-`-pyroscope-password-file` are mutually exclusive, an empty password file is
-rejected by name, and a username set without a password (or vice versa, from
-whichever source is in play) refuses to start — half-configured auth would
-otherwise send unauthenticated requests to the upstream with nothing to say
-so. A username may not contain `:`, which is ambiguous with the
-username/password separator.
-
-**Use `https://` for an authenticated upstream.** Basic auth sends the
-credential in every request; over plain `http://` to anything other than
-localhost, that is the token on the wire in the clear. pyrolens warns loudly
-at startup if it detects this (it does not refuse to start, since testing
-against a local, non-TLS Pyroscope with auth turned on is legitimate), but
-the credential should not cross a real network unencrypted.
-
-**The proxy forwards an explicit header allowlist, not whatever arrived.**
-Outbound, only `Content-Type`, `X-Scope-OrgID` and `Accept-Encoding` are
-copied from the visitor's request, plus `Authorization` set by pyrolens
-itself when upstream credentials are configured — never the visitor's own
-(one exception outside pyrolens's control: Go's own HTTP client re-adds a
-fixed `Te: trailers`, with no visitor-controlled data, when the inbound
-request happened to carry one — a browser's `fetch` cannot). A visitor's
-cookies (a fronting proxy's own SSO session, say), browser fingerprint
-headers and IP address (`X-Forwarded-For`) never reach Pyroscope. See
-Security below for the same allowlisting in the other direction.
+Use `https://` — basic auth sends the credential with every request, and
+pyrolens warns loudly at startup if it would cross a real network in the
+clear.
 
 Grafana Cloud recipe, with a token file mounted at `/etc/pyrolens/token`.
 Find `<cloud-profiles-url>` and `<stack-id>` on the stack's "Pyroscope"
-connection details page in Grafana Cloud, and generate the token as a Cloud
-Access Policy token scoped to `profiles:read` — a write-only token is
-rejected by Pyroscope with 403:
+connection details page, and generate the token as a Cloud Access Policy
+token scoped to `profiles:read` (a write-only token is rejected by Pyroscope
+with 403):
 
 ```sh
 PYROSCOPE_URL=https://<cloud-profiles-url> \
@@ -152,95 +115,81 @@ PYROSCOPE_PASSWORD_FILE=/etc/pyrolens/token \
   ./pyrolens
 ```
 
-This only authenticates pyrolens to Pyroscope. It does not authenticate
-visitors to pyrolens — see Security below.
+This authenticates pyrolens to Pyroscope — not visitors to pyrolens; see
+Security below.
 
 ### Tenant control
 
-By default, the tenant switcher is not an isolation boundary — see Security
-below. `-pyroscope-tenant-id` and `-allowed-tenants` are an *optional*
-boundary for the two shapes that default deliberately isn't, and they are
-mutually exclusive (setting both refuses to start):
+Two optional, mutually exclusive ways to bound which tenants an instance can
+reach:
 
-- **`-pyroscope-tenant-id` (pin)** — for one Pyroscope tenant per pyrolens
-  instance. Every outbound request's `X-Scope-OrgID` is overwritten to this
-  exact value, including the UI's own deliberately-empty multitenancy probe,
-  so a visitor's `tenant` URL param can no longer choose a different tenant
-  no matter what it says.
-- **`-allowed-tenants` (allowlist)** — for one pyrolens instance shared across
-  several tenants, confined to a known subset. A request whose tenant is
-  non-empty and not in the comma-separated list is rejected with 403 before
-  it reaches Pyroscope; an absent or empty tenant (the multitenancy probe)
-  always passes through untouched.
+- **`-pyroscope-tenant-id` (pin)** — one Pyroscope tenant per pyrolens
+  instance. Every outbound request is forced to this tenant; a visitor's
+  `tenant` URL param cannot choose a different one.
+- **`-allowed-tenants` (allowlist)** — one shared instance confined to a
+  known subset. Requests for any other non-empty tenant are rejected with
+  403 before reaching Pyroscope; a request with no tenant (the UI's own
+  multitenancy probe) always passes through untouched.
 
-Neither authenticates the visitor — they constrain which tenant a request can
-reach, not who is allowed to send one. Put pyrolens behind whatever
-authenticates people, same as always; these flags are for bounding blast
-radius once they're in, and compose with upstream basic auth however a
-deployment needs (a pinned or allowlisted single-tenant Grafana Cloud stack,
-for instance).
+Neither authenticates the visitor — they bound blast radius, not identity.
 
 ### Security
 
-**Pyrolens performs no authentication or authorization.** Anyone who can
-reach it can query everything the Pyroscope server behind it will answer, so
-put it somewhere only your team can reach and front it with whatever
-authenticates your other internal tools.
+- **Pyrolens performs no authentication or authorization.** Anyone who can
+  reach it can query everything the Pyroscope behind it will answer. Put it
+  somewhere only your team can reach, fronted by whatever authenticates your
+  other internal tools.
+- **The tenant switcher is not an isolation boundary by default.** The
+  tenant is a URL parameter; without `-pyroscope-tenant-id` or
+  `-allowed-tenants`, anyone can read any tenant by editing the address bar.
+  Treat it as a convenience for people already allowed to see every tenant.
+- **Headers cross the proxy through an explicit allowlist, both
+  directions.** A visitor's cookies, `Authorization` and IP address never
+  reach Pyroscope; an upstream's `Set-Cookie` never reaches the browser.
 
-**The tenant switcher is not an isolation boundary, by default.** The tenant
-is a URL parameter that becomes the `X-Scope-OrgID` header, so without
-further configuration a user can read any tenant by editing the address bar.
-Treat it as a convenience for people who are already allowed to see every
-tenant, not as a permission check — unless `-pyroscope-tenant-id` or
-`-allowed-tenants` (see Tenant control above) is configured to bound it.
-
-**Headers are proxied through an explicit allowlist, in both directions.**
-The proxy does not transparently forward whatever headers arrived: a
-visitor's cookies (a fronting SSO's session cookie, say), `Authorization`,
-and IP address never reach the Pyroscope upstream, and an upstream (or a
-load balancer in front of it) setting `Set-Cookie` never reaches the
-browser. Only what pyrolens's own client actually needs crosses either
-direction.
-
-Only that one path prefix is proxied; anything else is served from the
-embedded UI, and a proxied request has to carry a canonical path.
-
-## URL parameters
+## Sharing and URL parameters
 
 All state is carried in query parameters; every view is shareable.
 
-| Param                                              | Meaning                                                              |
-| -------------------------------------------------- | -------------------------------------------------------------------- |
-| `tenant`                                           | tenant ID, sent as `X-Scope-OrgID` (multi-tenant Pyroscope only)     |
-| `query`                                            | label selector incl. `profile_type`, e.g. `{service_name="x", ...}`  |
-| `from` / `until`                                   | main time range — `now-1h`-style relative or unix-ms absolute        |
-| `refresh`                                          | auto-refresh interval: `10s` \| `30s` \| `1m` \| `5m`; anything else means off |
-| `leftQuery` / `leftFrom` / `leftUntil` (+ `right…`) | Comparison & Diff pane selections; default to `query` / range halves |
-| `groupBy`                                          | Tag Explorer grouping label                                          |
-| `sort`                                             | Tag Explorer breakdown table sort: `avg` or `max` (default: Share/sum) |
-| `fgSearch`                                         | flame graph search text; shared across Single, Comparison and Diff   |
-| `fgSandwich`                                       | flame graph sandwich-view selection (function label); shared across Single, Comparison and Diff |
-| `maxNodes`                                         | positive integer (1–1,000,000) capping the flamegraph node count per query; server default when absent or invalid |
+| Param                                               | Meaning                                                                                         |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `tenant`                                            | tenant ID, sent as `X-Scope-OrgID` (multi-tenant Pyroscope only)                                |
+| `query`                                             | label selector incl. `profile_type`, e.g. `{service_name="x", ...}`                             |
+| `from` / `until`                                    | main time range — `now-1h`-style relative or unix-ms absolute                                   |
+| `refresh`                                           | auto-refresh interval: `10s` \| `30s` \| `1m` \| `5m`; anything else means off                  |
+| `leftQuery` / `leftFrom` / `leftUntil` (+ `right…`) | Comparison & Diff pane selections; default to `query` / range halves                            |
+| `groupBy`                                           | Tag Explorer grouping label                                                                     |
+| `sort`                                              | Tag Explorer breakdown table sort: `avg` or `max` (default: Share/sum)                          |
+| `fgSearch`                                          | flame graph search text; shared across Single, Comparison and Diff                              |
+| `fgSandwich`                                        | flame graph sandwich-view selection (function label); shared across Single, Comparison and Diff |
+| `maxNodes`                                          | positive integer (1–1,000,000) capping the flamegraph node count per query; server default when absent or invalid — a useful dial when heavy profiles are slow |
 
 Views: `/` (Single), `/comparison`, `/diff`, `/explore` (Tag Explorer).
 
-Keyboard shortcuts: `y` or `t a` switches the time range to absolute so the
-URL can be shared as-is; `t c` copies it (Grafana's own clipboard format, so
-it pastes in either tool) and `t v` pastes it back. `t z` zooms out 2× around
-the center of the current range; `t ArrowLeft`/`t ArrowRight` shift the
-window back/forward by half its span. Like `t a`, `t z` and the arrow
-shortcuts always write an absolute range, even starting from a relative one.
-`t ArrowRight` clamps to the current time — it will not shift past "now", and
-does nothing once the window already reaches it. `t v` needs a secure context
-(HTTPS or localhost) to read the clipboard; `t c` has a legacy fallback for an
-insecure one, the same one `copy absolute link` uses, which can still fail
-depending on the browser. Grafana's rounded relative ranges (`now/d` and the
-like) are not supported in either direction: pyrolens URLs cannot express
-them, so pasting one reports "Paste failed".
+Switching tenant from the nav bar starts fresh at `/?tenant=<new>`; the
+browser's Back button restores the previous tenant's screen intact.
 
-The refresh picker next to the time range control repeats the current view on
-the chosen interval — only while the range is relative and ending at "now",
-and paused whenever the tab is in the background.
+The refresh picker next to the time range control repeats the current view
+on the chosen interval — only while the range ends at "now", and paused
+whenever the tab is in the background.
+
+### Keyboard shortcuts
+
+| Keys                            | Action                                                                                        |
+| ------------------------------- | --------------------------------------------------------------------------------------------- |
+| `y` or `t a`                    | switch the time range to absolute, so the URL can be shared as-is                             |
+| `t c`                           | copy the time range (Grafana's clipboard format — pastes into either tool)                    |
+| `t v`                           | paste a time range from the clipboard                                                          |
+| `t z`                           | zoom out 2× around the center of the current range                                            |
+| `t ArrowLeft` / `t ArrowRight`  | shift the window back / forward by half its span (`ArrowRight` never shifts past "now")       |
+
+`t a`, `t z` and the arrow shortcuts always write an absolute range, even
+starting from a relative one. `t v` needs a secure context (HTTPS or
+localhost) to read the clipboard; `t c` has a legacy fallback for insecure
+contexts, so on a plain-HTTP deployment copy may work while paste will
+not. Grafana's rounded relative ranges
+(`now/d` and the like) are not supported in either direction: pyrolens URLs
+cannot express them, so pasting one reports "Paste failed".
 
 ## Development
 
@@ -263,24 +212,16 @@ docker run -p 4040:4040 grafana/pyroscope
 docker run -p 4040:4040 grafana/pyroscope -auth.multitenancy-enabled
 ```
 
+`dev/` has a docker-compose setup that also feeds it realistic profiles —
+see `dev/README.md`.
+
 ## Supply chain
 
-Container base images (`Dockerfile`, `Dockerfile.release`) are pinned to a
-digest alongside their tag (`node:24-alpine@sha256:...`), so a rebuild of the
-same commit can't silently pick up different base-image bytes; Renovate
-(`docker:pinDigests`) keeps those digests current.
-
-Every release (binaries and the `ghcr.io/be-hase/pyrolens` image) ships with
-a Syft-generated SBOM for each archive and a
-[build provenance attestation](https://github.com/actions/attest-build-provenance)
-for both the archives and the image, produced in CI from the tag build. The
-guarantee differs slightly by artifact, because only one of them can be held
-back until it's attested: the GitHub Release is created as a draft and only
-published once the archives (and their SBOMs) are attested, so nothing there
-is downloadable before its attestation exists; the image is pushed to GHCR
-as part of the same GoReleaser run and is public moments before its own
-attestation lands, since there is no equivalent "draft" state for an OCI
-registry push. Verify either with the `gh` CLI:
+Container base images are digest-pinned. Every release ships a
+Syft-generated SBOM per archive and
+[build provenance attestations](https://github.com/actions/attest-build-provenance)
+for the archives and the `ghcr.io/be-hase/pyrolens` image, produced in CI
+from the tag build. Verify with the `gh` CLI:
 
 ```sh
 gh attestation verify oci://ghcr.io/be-hase/pyrolens:<tag> --owner be-hase
@@ -293,4 +234,4 @@ Pyrolens is licensed **Apache-2.0** (see `LICENSE`). Bundled third-party
 code retains its own license file alongside the code, and
 `THIRD-PARTY-NOTICES.md` collects every bundled component's copyright and
 permission notice — it ships in the release archives and at `/licenses` in
-the container image, since the minified UI bundle strips license comments.
+the container image.
