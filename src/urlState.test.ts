@@ -4,10 +4,12 @@ import { beforeEach, describe, it, vi } from 'vitest';
 import {
   advancesNow,
   buildUrl,
+  markUserReload,
   navigate,
   onLinkClick,
   pushGenerationNow,
   useRoute,
+  useTickNavigation,
 } from './urlState.ts';
 
 beforeEach(() => {
@@ -164,6 +166,161 @@ describe('pushGenerationNow', () => {
       await popped;
     });
     assert.equal(pushGenerationNow(), before + 1);
+  });
+});
+
+describe('useTickNavigation', () => {
+  beforeEach(() => {
+    // A plain navigate() carries no tick option, so this settles the flag
+    // back to false before each test regardless of what a previous test in
+    // this file left it as — the flag is module state, not reset by the
+    // top-level beforeEach's replaceState.
+    navigate({ set: {} });
+  });
+
+  it('is false before any tick navigation', () => {
+    const { result } = renderHook(() => useTickNavigation());
+    assert.equal(result.current, false);
+  });
+
+  it('is true immediately after a tick navigation', () => {
+    const { result } = renderHook(() => useTickNavigation());
+    act(() => navigate({ set: {}, tick: true }));
+    assert.equal(result.current, true);
+  });
+
+  it('is cleared by a subsequent non-tick navigation', () => {
+    const { result } = renderHook(() => useTickNavigation());
+    act(() => navigate({ set: {}, tick: true }));
+    assert.equal(result.current, true);
+    act(() => navigate({ path: '/diff', set: { query: '{a="b"}' } }));
+    assert.equal(result.current, false);
+  });
+
+  it('is cleared by a no-op non-tick navigation too — a Run press right after a tick must not leave the marker set', () => {
+    const { result } = renderHook(() => useTickNavigation());
+    act(() => navigate({ set: {}, tick: true }));
+    assert.equal(result.current, true);
+    act(() => navigate({ set: {} }));
+    assert.equal(result.current, false);
+  });
+
+  it('is cleared by popstate (Back/Forward)', async () => {
+    act(() => navigate({ path: '/comparison' }));
+    act(() => navigate({ set: {}, tick: true }));
+    const { result } = renderHook(() => useTickNavigation());
+    assert.equal(result.current, true);
+    // History traversal, and the popstate the hook listens for, land on a
+    // later turn — the real browser sequence, not a shortcut (mirrors
+    // pushGenerationNow's identical Back test above).
+    await act(async () => {
+      const popped = new Promise((resolve) =>
+        window.addEventListener('popstate', resolve, { once: true }),
+      );
+      window.history.back();
+      await popped;
+    });
+    assert.equal(result.current, false);
+  });
+
+  it('is left alone by a view-only navigation mid-tick-reload (fgSearch settling)', () => {
+    // The flag records the cause of the CURRENT reload, not of the most
+    // recent navigation. A view-only write (VIEW_ONLY_PARAMS — fgSearch,
+    // fgSandwich, sort) never refetches, so it must not overwrite a tick
+    // marker that's still describing an in-flight reload it had nothing to
+    // do with — that was the exact regression this pins: a fetch-irrelevant
+    // replace flipping the flag back to false and re-arming the dim/
+    // placeholder for the rest of a still-tick-caused reload.
+    const { result } = renderHook(() => useTickNavigation());
+    act(() => navigate({ set: {}, tick: true }));
+    assert.equal(result.current, true);
+    act(() => navigate({ set: { fgSearch: 'alloc' } }));
+    assert.equal(
+      result.current,
+      true,
+      'a view-only write must not clear the tick marker',
+    );
+  });
+
+  it('is still overwritten by a fetch-relevant navigation, even without a tick marker', () => {
+    // Regression guard for the gate itself: a real (non-view-only) change
+    // must still land as before — this is not a general "sticky until
+    // explicitly cleared" flag.
+    const { result } = renderHook(() => useTickNavigation());
+    act(() => navigate({ set: {}, tick: true }));
+    assert.equal(result.current, true);
+    act(() => navigate({ set: { query: '{a="b"}' } }));
+    assert.equal(result.current, false);
+  });
+
+  it('is left alone by a view-only popstate mid-tick-reload (fgSearch-only Back)', async () => {
+    // Same gate as the navigate() case above, mirrored for Back/Forward: a
+    // popped entry that differs from the current one only by a view-only
+    // param must not re-arm the dim over a reload that is still, in fact,
+    // tick-caused.
+    act(() => navigate({ path: '/', set: { query: '{a="b"}' } })); // A: fetch-relevant push
+    act(() => navigate({ set: { fgSearch: 'y' } })); // B: pushes a real entry, view-only diff from A
+    act(() => navigate({ set: {}, tick: true })); // arm the marker (no-op nav at B, downgrades to replace)
+    const { result } = renderHook(() => useTickNavigation());
+    assert.equal(result.current, true);
+
+    await act(async () => {
+      const popped = new Promise((resolve) =>
+        window.addEventListener('popstate', resolve, { once: true }),
+      );
+      window.history.back(); // back to A — differs from B only by fgSearch
+      await popped;
+    });
+    assert.equal(
+      result.current,
+      true,
+      'a view-only Back must not clear the tick marker',
+    );
+  });
+});
+
+describe('markUserReload', () => {
+  beforeEach(() => {
+    navigate({ set: {} });
+  });
+
+  it('clears an armed tick marker', () => {
+    const { result } = renderHook(() => useTickNavigation());
+    act(() => navigate({ set: {}, tick: true }));
+    assert.equal(result.current, true);
+    act(() => markUserReload());
+    assert.equal(result.current, false);
+  });
+
+  it('notifies useTickNavigation without dispatching pyroscope:navigate', () => {
+    // useFetched's retry() doesn't navigate at all — it must be able to
+    // clear the marker without going through navigate(), which would
+    // advance "now" (advancesNow) and refire every relative-range fetch on
+    // screen just to mark one retry as user-caused.
+    act(() => navigate({ set: {}, tick: true }));
+    const { result } = renderHook(() => useTickNavigation());
+    assert.equal(result.current, true);
+
+    let navEvents = 0;
+    const onNav = () => navEvents++;
+    window.addEventListener('pyroscope:navigate', onNav);
+    act(() => markUserReload());
+    window.removeEventListener('pyroscope:navigate', onNav);
+
+    assert.equal(result.current, false);
+    assert.equal(
+      navEvents,
+      0,
+      'markUserReload must not dispatch pyroscope:navigate',
+    );
+  });
+
+  it('does not touch the URL or the push-generation counter', () => {
+    const beforeUrl = window.location.href;
+    const beforeGen = pushGenerationNow();
+    act(() => markUserReload());
+    assert.equal(window.location.href, beforeUrl);
+    assert.equal(pushGenerationNow(), beforeGen);
   });
 });
 

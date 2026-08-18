@@ -6,6 +6,7 @@ import { SERIES_COLORS } from '@components/seriesColors';
 import { Panel } from '@components/Panel';
 import { Empty } from '@components/core/Empty';
 import { Loading } from '@components/core/Loading';
+import { LoadingMeta } from '@components/core/LoadingMeta';
 import {
   fetchGroupedTimelines,
   fetchLabelNames,
@@ -28,7 +29,7 @@ import {
   summarize,
   type SortKey,
 } from './tagExplorerData';
-import { navigate, useRoute } from '../urlState';
+import { navigate, useRoute, useTickNavigation } from '../urlState';
 import { ErrorBanner } from './ComparisonPane';
 import './TagExplorerView.css';
 
@@ -199,6 +200,14 @@ export function TagExplorerView({
     (!servicesSettled || defaultQueryPending(services, params.get('query'))) &&
     !profileTypeID;
   const stillWorking = loading || settingUp || startingUp;
+  // An auto-refresh tick must not visually interrupt (urlState.ts's
+  // useTickNavigation doctrine) — drives the timeline chart and the
+  // Breakdown panel's Loading-vs-Empty choice below; the panel meta's
+  // "Loading…" just below keeps using the full `stillWorking`. Composed
+  // explicitly with settingUp/startingUp rather than relied on to never
+  // coincide with a tick — see the doctrine comment for why.
+  const tickNav = useTickNavigation();
+  const visualStillWorking = (loading && !tickNav) || settingUp || startingUp;
   const error =
     malformedMessage(query) ??
     (active ? grouped.fetchError : null) ??
@@ -315,7 +324,7 @@ export function TagExplorerView({
   // would be the one area left with no signal. No contextual claim while
   // the banner already shows this fetch's error — see FlameGraph's
   // identical gate.
-  const breakdownEmpty = stillWorking ? (
+  const breakdownEmpty = visualStillWorking ? (
     <Loading />
   ) : (
     <Empty message={error ? undefined : BREAKDOWN_EMPTY_MESSAGE} />
@@ -369,11 +378,11 @@ export function TagExplorerView({
       <Panel
         title={groupBy ? `Timeline by ${groupBy}` : 'Timeline'}
         meta={
-          stillWorking
-            ? 'Loading…'
-            : allRows.length > MAX_SERIES
-              ? `top ${MAX_SERIES} of ${allRows.length} series`
-              : undefined
+          stillWorking ? (
+            <LoadingMeta />
+          ) : allRows.length > MAX_SERIES ? (
+            `top ${MAX_SERIES} of ${allRows.length} series`
+          ) : undefined
         }
       >
         <MultiTimeSeries
@@ -381,7 +390,7 @@ export function TagExplorerView({
           profileTypeId={profileTypeID}
           startMs={range.start}
           endMs={range.end}
-          loading={stillWorking}
+          loading={visualStillWorking}
         />
       </Panel>
 

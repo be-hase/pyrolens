@@ -1,0 +1,9 @@
+/* Sizes only — Loading.css owns the `.loading-spin` animation and its
+   prefers-reduced-motion rule; sharing that class instead of redefining it
+   is what keeps the panel-meta spinner and the body placeholder's spinner
+   moving (and stopping) in sync. */
+.loading-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}

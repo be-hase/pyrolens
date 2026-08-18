@@ -1,7 +1,15 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import { fetchDiffFlamegraph, fetchTimeline } from '@api/client';
+import { navigate } from '../urlState.ts';
 import { DiffView } from './DiffView.tsx';
 import type { ViewProps } from '../App.tsx';
 
@@ -69,6 +77,10 @@ beforeEach(() => {
 
 afterEach(() => {
   at('/');
+  // A tick navigation in one test must not leak its marker into the next —
+  // a plain navigate() carries no tick option and settles it back to false
+  // (mirrors SingleView.test.tsx's identical reset).
+  navigate({ set: {} });
 });
 
 describe('DiffView ControlsBar', () => {
@@ -229,10 +241,14 @@ describe('DiffView reload dim', () => {
       assert.ok(container.querySelector('.flamegraph-wrapper')),
     );
 
-    // A range tick (see AGENTS.md: "now" advances on every navigation)
-    // refires the diff fetch under the same queries while the previous
-    // frames are still on screen — hold this one pending so `loading` stays
-    // true with `diff` still non-null.
+    // A `range` prop change stands in for whatever re-fires the diff fetch
+    // under the same queries while the previous frames are still on
+    // screen — this test performs no navigate() call at all, so urlState's
+    // tick marker stays at its default (cleared by the file's top-level
+    // afterEach), pinning the USER-navigation baseline: no marker, so the
+    // reload dims. See the "tick navigation" test below for the suppressed
+    // case. Hold this one pending so `loading` stays true with `diff` still
+    // non-null.
     diffOf.mockReturnValue(new Promise(() => {}));
     rerender(
       <DiffView {...PROPS} range={{ start: 2_000_000, end: 5_600_000 }} />,
@@ -248,6 +264,45 @@ describe('DiffView reload dim', () => {
     );
   });
 
+  it('does not dim the diff flamegraph wrapper when the refetch is caused by a tick navigation — the panel meta still says "Loading…"', async () => {
+    // An auto-refresh tick is background activity (urlState.ts's
+    // useTickNavigation doctrine) — must not visually interrupt what's on
+    // screen. Same setup as the test above, but the pending refetch is
+    // marked as tick-caused (what RefreshPicker's own interval firing —
+    // or its visibility-return refresh — does) before it starts.
+    diffOf.mockResolvedValueOnce(ONE_FRAME);
+    const { container, rerender } = render(<DiffView {...PROPS} />);
+    await waitFor(() =>
+      assert.ok(container.querySelector('.flamegraph-wrapper')),
+    );
+
+    diffOf.mockReturnValue(new Promise(() => {}));
+    act(() => navigate({ set: {}, tick: true }));
+    rerender(
+      <DiffView {...PROPS} range={{ start: 2_000_000, end: 5_600_000 }} />,
+    );
+    await waitFor(() => assert.equal(diffOf.mock.calls.length, 2));
+
+    const wrapper = container.querySelector('.flamegraph-wrapper');
+    assert.ok(wrapper, 'expected the flamegraph-wrapper to still render');
+    assert.ok(
+      !wrapper.classList.contains('active'),
+      'a tick-caused reload must not dim the diff flame graph',
+    );
+
+    const panel = screen
+      .getByText('Diff flamegraph')
+      .closest<HTMLElement>('.panel')!;
+    assert.ok(
+      within(panel).getByText('Loading…'),
+      'the panel meta must keep announcing the reload during a tick',
+    );
+    assert.ok(
+      panel.querySelector('.loading-meta .loading-spin'),
+      'expected the meta spinner (LoadingMeta) next to the text',
+    );
+  });
+
   it('does not dim the diff flamegraph wrapper once the fetch has settled', async () => {
     diffOf.mockResolvedValue(ONE_FRAME);
     const { container } = render(<DiffView {...PROPS} />);
@@ -260,6 +315,73 @@ describe('DiffView reload dim', () => {
     assert.ok(
       !wrapper.classList.contains('active'),
       'the wrapper must not carry the active dim class once the fetch has settled',
+    );
+  });
+});
+
+describe('DiffView: a tick-caused reload over a settled-empty diff must not swap the Empty message for the Loading placeholder', () => {
+  it('via tick: the "No profiles matched" message stays', async () => {
+    // The default mock (top-level beforeEach) already resolves an empty
+    // diff, so the first render settles honestly empty.
+    const { rerender } = render(<DiffView {...PROPS} />);
+    const panel = () =>
+      screen.getByText('Diff flamegraph').closest<HTMLElement>('.panel')!;
+    await waitFor(() =>
+      assert.ok(
+        within(panel()).getByText(
+          /No profiles matched this query in the baseline or comparison window/,
+        ),
+      ),
+    );
+
+    diffOf.mockReturnValueOnce(new Promise(() => {}));
+    act(() => navigate({ set: {}, tick: true }));
+    rerender(
+      <DiffView {...PROPS} range={{ start: 2_000_000, end: 5_600_000 }} />,
+    );
+    await waitFor(() => assert.equal(diffOf.mock.calls.length, 2));
+
+    assert.ok(
+      within(panel()).getByText(
+        /No profiles matched this query in the baseline or comparison window/,
+      ),
+      'a tick reload over a settled-empty diff must keep the honest Empty message',
+    );
+    assert.ok(
+      !panel().querySelector('.loading'),
+      'must not swap the Empty message for the Loading placeholder on a tick',
+    );
+    assert.ok(within(panel()).getByText('Loading…'));
+  });
+
+  it('via a user navigation: the Loading placeholder replaces the Empty message, as today', async () => {
+    const { rerender } = render(<DiffView {...PROPS} />);
+    const panel = () =>
+      screen.getByText('Diff flamegraph').closest<HTMLElement>('.panel')!;
+    await waitFor(() =>
+      assert.ok(
+        within(panel()).getByText(
+          /No profiles matched this query in the baseline or comparison window/,
+        ),
+      ),
+    );
+
+    diffOf.mockReturnValueOnce(new Promise(() => {}));
+    rerender(
+      <DiffView {...PROPS} range={{ start: 2_000_000, end: 5_600_000 }} />,
+    );
+    await waitFor(() => assert.equal(diffOf.mock.calls.length, 2));
+
+    await waitFor(() =>
+      assert.ok(
+        panel().querySelector('.loading'),
+        'a user-caused reload must still swap Empty for the Loading placeholder',
+      ),
+    );
+    assert.ok(
+      !within(panel()).queryByText(
+        /No profiles matched this query in the baseline or comparison window/,
+      ),
     );
   });
 });

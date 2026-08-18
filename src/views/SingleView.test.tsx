@@ -1,7 +1,15 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import { fetchFlamegraph, fetchTimeline } from '@api/client';
+import { navigate } from '../urlState.ts';
 import { SingleView } from './SingleView.tsx';
 import type { ViewProps } from '../App.tsx';
 
@@ -235,5 +243,141 @@ describe('SingleView explicit empty query stays honest through a services refres
     );
     assert.ok(screen.getByText('No query selected.'));
     assert.ok(!container.querySelector('.loading'));
+  });
+});
+
+describe('SingleView: a tick-caused reload must not visually interrupt', () => {
+  afterEach(() => {
+    at('/');
+    // A tick navigation in one test must not leak its marker into the next
+    // test (or the next file in the same worker) — a plain navigate() has
+    // no tick option and settles it back to false (mirrors urlState.test.ts
+    // and RefreshPicker.test.tsx's identical resets).
+    navigate({ set: {} });
+  });
+
+  const timelinePanel = () =>
+    screen.getByText('Timeline').closest<HTMLElement>('.panel')!;
+  const flamegraphPanel = () =>
+    screen.getByText('Flamegraph').closest<HTMLElement>('.panel')!;
+
+  it('settled data, tick reload: the Timeline chart keeps full opacity and the panel meta still says "Loading…" with its spinner', async () => {
+    timelineOf.mockResolvedValueOnce([{ timestamp: 1_000_000, value: 5 }]);
+    const { rerender } = render(<SingleView {...PROPS} />);
+    await waitFor(() =>
+      assert.ok(
+        timelinePanel().querySelector('.timeseries-canvas'),
+        'expected the first fetch to settle with data drawn',
+      ),
+    );
+    assert.ok(!timelinePanel().querySelector('.reload-dim.active'));
+
+    // Hold the second fetch pending — a reload in flight over the settled
+    // data above — and mark it tick-caused before triggering it (a `range`
+    // change stands in for whatever actually re-fires the fetch; the view
+    // only cares about the tick marker, not what changed).
+    timelineOf.mockReturnValueOnce(new Promise(() => {}));
+    act(() => navigate({ set: {}, tick: true }));
+    rerender(
+      <SingleView {...PROPS} range={{ start: 2_000_000, end: 5_600_000 }} />,
+    );
+    await waitFor(() => assert.equal(timelineOf.mock.calls.length, 2));
+
+    assert.ok(
+      within(timelinePanel()).getByText('Loading…'),
+      'the panel meta must keep announcing the reload during a tick',
+    );
+    assert.ok(
+      timelinePanel().querySelector('.loading-meta .loading-spin'),
+      'expected the meta spinner (LoadingMeta) next to the text',
+    );
+    assert.ok(
+      !timelinePanel().querySelector('.reload-dim.active'),
+      'a tick-caused reload must not dim the chart',
+    );
+  });
+
+  it('settled data, user-navigation reload: the Timeline chart dims', async () => {
+    timelineOf.mockResolvedValueOnce([{ timestamp: 1_000_000, value: 5 }]);
+    const { rerender } = render(<SingleView {...PROPS} />);
+    await waitFor(() =>
+      assert.ok(timelinePanel().querySelector('.timeseries-canvas')),
+    );
+
+    timelineOf.mockReturnValueOnce(new Promise(() => {}));
+    // No tick marker this time — this is what a Run press, a param edit or
+    // Back/Forward looks like from the view's perspective.
+    rerender(
+      <SingleView {...PROPS} range={{ start: 2_000_000, end: 5_600_000 }} />,
+    );
+    await waitFor(() => assert.equal(timelineOf.mock.calls.length, 2));
+
+    await waitFor(() =>
+      assert.ok(
+        timelinePanel().querySelector('.reload-dim.active'),
+        'a user-caused reload must still dim the chart',
+      ),
+    );
+  });
+
+  it('settled-empty flamegraph, tick reload: the "No profiles matched" message stays — no Loading placeholder swap', async () => {
+    // The default mock (top-level beforeEach) already resolves an empty
+    // flamegraph, so the first render settles honestly empty.
+    const { rerender } = render(<SingleView {...PROPS} />);
+    await waitFor(() =>
+      assert.ok(
+        within(flamegraphPanel()).getByText(
+          /No profiles matched this query in this range/,
+        ),
+      ),
+    );
+
+    flamegraphOf.mockReturnValueOnce(new Promise(() => {}));
+    act(() => navigate({ set: {}, tick: true }));
+    rerender(
+      <SingleView {...PROPS} range={{ start: 2_000_000, end: 5_600_000 }} />,
+    );
+    await waitFor(() => assert.equal(flamegraphOf.mock.calls.length, 2));
+
+    assert.ok(
+      within(flamegraphPanel()).getByText(
+        /No profiles matched this query in this range/,
+      ),
+      'a tick reload over a settled-empty result must keep the honest Empty message',
+    );
+    assert.ok(
+      !flamegraphPanel().querySelector('.loading'),
+      'must not swap the Empty message for the Loading placeholder on a tick',
+    );
+    assert.ok(within(flamegraphPanel()).getByText('Loading…'));
+  });
+
+  it('settled-empty flamegraph, user-navigation reload: the Loading placeholder replaces the Empty message, as today', async () => {
+    const { rerender } = render(<SingleView {...PROPS} />);
+    await waitFor(() =>
+      assert.ok(
+        within(flamegraphPanel()).getByText(
+          /No profiles matched this query in this range/,
+        ),
+      ),
+    );
+
+    flamegraphOf.mockReturnValueOnce(new Promise(() => {}));
+    rerender(
+      <SingleView {...PROPS} range={{ start: 2_000_000, end: 5_600_000 }} />,
+    );
+    await waitFor(() => assert.equal(flamegraphOf.mock.calls.length, 2));
+
+    await waitFor(() =>
+      assert.ok(
+        flamegraphPanel().querySelector('.loading'),
+        'a user-caused reload must still swap Empty for the Loading placeholder',
+      ),
+    );
+    assert.ok(
+      !within(flamegraphPanel()).queryByText(
+        /No profiles matched this query in this range/,
+      ),
+    );
   });
 });

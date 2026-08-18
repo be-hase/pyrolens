@@ -5,7 +5,7 @@ import { Button } from '@components/core/Button';
 import { useFlamegraph } from '@hooks/useProfileData';
 import { parseMaxNodes } from '@api/client';
 import { defaultQueryPending, splitQuery } from '../queryLang';
-import { navigate, useRoute } from '../urlState';
+import { navigate, useRoute, useTickNavigation } from '../urlState';
 import { ComparisonPane, ErrorBanner } from './ComparisonPane';
 import {
   swappedPaneParams,
@@ -61,6 +61,10 @@ function PaneFlamegraph({
   // is still the unset main query, so `profileTypeID` is empty because
   // there is no query yet — not because nothing matched.
   const settlingQuery = !!queryStartupGap && !profileTypeID;
+  // An auto-refresh tick must not visually interrupt (urlState.ts's
+  // useTickNavigation doctrine) — suppresses the reload-dim/loading-swap
+  // below for a tick-caused reload.
+  const tickNav = useTickNavigation();
   return (
     <>
       {error && <ErrorBanner error={error} retry={retry} />}
@@ -68,7 +72,7 @@ function PaneFlamegraph({
         data={flamegraph}
         profileTypeId={profileTypeID}
         vertical
-        loading={loading || settlingQuery}
+        loading={(loading && !tickNav) || settlingQuery}
         // Suppressed while this pane has its own error — see SingleView's
         // identical gate.
         empty={

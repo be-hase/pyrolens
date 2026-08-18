@@ -1,7 +1,8 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import { fetchFlamegraph, fetchTimeline } from '@api/client';
+import { navigate } from '../urlState.ts';
 import { ComparisonView } from './ComparisonView.tsx';
 import type { ViewProps } from '../App.tsx';
 
@@ -24,6 +25,19 @@ class StubResizeObserver {
   unobserve() {}
   disconnect() {}
 }
+
+// The reload-dim test below needs the flame graph's data-present branch to
+// render without throwing — the real vendored FlameGraph needs a canvas 2D
+// context jsdom doesn't provide (see DiffView.test.tsx's identical stub).
+// Every other test in this file only ever resolves an empty flamegraph, so
+// this has no effect on them.
+vi.mock('@lib/flamegraph', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@lib/flamegraph')>();
+  return {
+    ...actual,
+    FlameGraph: () => <div data-testid="grafana-flamegraph-stub" />,
+  };
+});
 
 const flamegraphOf = vi.mocked(fetchFlamegraph);
 const timelineOf = vi.mocked(fetchTimeline);
@@ -148,5 +162,76 @@ describe('ComparisonView explicit empty query stays honest through a services re
     );
     assert.equal(screen.getAllByText('No query selected.').length, 2);
     assert.ok(!container.querySelector('.loading'));
+  });
+});
+
+describe("ComparisonView: a tick-caused reload must not dim a pane's flame graph", () => {
+  // Minimal single flame graph: one root bar (gap 0, width 100, own 50,
+  // name index 0) — enough for flamebearerToDataFrame to return a truthy
+  // frame. See FlameGraph.test.tsx's identical ONE_FRAME.
+  const ONE_FRAME = { names: ['root'], levels: [[0, 100, 50, 0]] };
+
+  afterEach(() => {
+    at('/');
+    // A tick navigation in one test must not leak its marker into the next
+    // (mirrors SingleView.test.tsx's identical reset).
+    navigate({ set: {} });
+  });
+
+  it('via tick: both panes keep full opacity while the reload is in flight', async () => {
+    flamegraphOf.mockResolvedValue(ONE_FRAME);
+    const { container, rerender } = render(<ComparisonView {...PROPS} />);
+    await waitFor(() =>
+      assert.equal(
+        container.querySelectorAll('.flamegraph-wrapper').length,
+        2,
+        'expected both panes to have settled with frames on screen',
+      ),
+    );
+    assert.equal(container.querySelectorAll('.reload-dim.active').length, 0);
+
+    // Hold the next round of fetches pending — a reload in flight over the
+    // frames already on screen — and mark it tick-caused first.
+    flamegraphOf.mockReturnValue(new Promise(() => {}));
+    act(() => navigate({ set: {}, tick: true }));
+    rerender(
+      <ComparisonView
+        {...PROPS}
+        range={{ start: 2_000_000, end: 5_600_000 }}
+      />,
+    );
+    await waitFor(() => assert.equal(flamegraphOf.mock.calls.length, 4));
+
+    assert.equal(
+      container.querySelectorAll('.reload-dim.active').length,
+      0,
+      "a tick-caused reload must not dim either pane's flame graph",
+    );
+  });
+
+  it('via a user navigation: the reload still dims the panes, as today', async () => {
+    flamegraphOf.mockResolvedValue(ONE_FRAME);
+    const { container, rerender } = render(<ComparisonView {...PROPS} />);
+    await waitFor(() =>
+      assert.equal(container.querySelectorAll('.flamegraph-wrapper').length, 2),
+    );
+
+    flamegraphOf.mockReturnValue(new Promise(() => {}));
+    // No tick marker — a `range` change with no tick is what a Run press,
+    // a param edit, or Back/Forward looks like from the view's perspective.
+    rerender(
+      <ComparisonView
+        {...PROPS}
+        range={{ start: 2_000_000, end: 5_600_000 }}
+      />,
+    );
+    await waitFor(() => assert.equal(flamegraphOf.mock.calls.length, 4));
+
+    await waitFor(() =>
+      assert.ok(
+        container.querySelectorAll('.reload-dim.active').length > 0,
+        'a user-caused reload must still dim the pane flame graphs',
+      ),
+    );
   });
 });

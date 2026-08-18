@@ -62,6 +62,16 @@ export interface NavigateOptions {
   set?: Record<string, string | null | undefined>;
   /** Use history.replaceState instead of pushState. */
   replace?: boolean;
+  /**
+   * Marks this navigation as caused by an auto-refresh tick, not a user
+   * action. Set ONLY by RefreshPicker's interval firing (and its
+   * visibility-return refresh — same background cadence, just triggered by
+   * the tab regaining focus instead of the timer). Every other navigate()
+   * call in the app — Run, a param edit, a link, Back/Forward — must leave
+   * this unset; see `useTickNavigation`'s doctrine below for why that
+   * distinction exists and how a caller is expected to use it.
+   */
+  tick?: boolean;
 }
 
 export function buildUrl(opts: NavigateOptions): string {
@@ -74,6 +84,45 @@ export function buildUrl(opts: NavigateOptions): string {
   const qs = params.toString();
   return `${basePath()}${path}${qs ? `?${qs}` : ''}`;
 }
+
+// Notification channel for the tick store below, deliberately separate from
+// `pyroscope:navigate`/`popstate` (what `subscribe`/`useRoute` above run
+// on). `useTickNavigation` used to piggyback on that same channel, but a
+// reload that never navigates at all — `useFetched`'s `retry()` — still has
+// to be able to clear the flag, and forcing that through a fake navigate()
+// call would advance "now" (`advancesNow` below) and refire every fetch on
+// screen just to mark one reload as user-caused. `markUserReload` notifies
+// this channel directly instead.
+const tickListeners = new Set<() => void>();
+
+function notifyTick(): void {
+  for (const cb of tickListeners) cb();
+}
+
+function subscribeTick(cb: () => void): () => void {
+  tickListeners.add(cb);
+  return () => {
+    tickListeners.delete(cb);
+  };
+}
+
+// Whether the current reload was caused by a tick (see NavigateOptions.tick).
+// Read only through `useTickNavigation`; written by navigate(), the popstate
+// listener below, and `markUserReload`.
+let lastNavigationWasTick = false;
+
+// The URL as of the last navigate()/popstate this module processed, so both
+// can diff against it through `advancesNow`. Mirrors App.tsx's identical
+// `prevNavUrl`/`bumpNow` tracker — deliberately duplicated rather than
+// shared. App's tracker decides when to advance "now" for relative-range
+// resolution, a view-layer concern; this one decides only whether a
+// navigation could have caused a reload at all, a question urlState.ts
+// already owns via `advancesNow`. Wiring the two together would couple this
+// module to App's `nowVersion` machinery for no shared benefit.
+let prevTickUrl: UrlLike = {
+  pathname: window.location.pathname,
+  search: window.location.search,
+};
 
 export function navigate(opts: NavigateOptions): void {
   const url = buildUrl(opts);
@@ -95,7 +144,84 @@ export function navigate(opts: NavigateOptions): void {
     window.history.pushState(null, '', url);
     pushGeneration += 1;
   }
+  // The tick flag records the cause of the CURRENT reload, not of the most
+  // recent navigation — a navigation that cannot itself cause a reload (a
+  // view-only param settling: the flame graph search debounce, a sandwich
+  // toggle, a sort click) must leave it alone, or it would wrongly re-arm
+  // the dim/placeholder for the rest of a still-in-flight tick-caused
+  // reload it had nothing to do with. `advancesNow` already answers exactly
+  // this question for App.tsx's "now" bump, for the same reason a view-only
+  // change doesn't refetch either — reused here rather than re-derived.
+  const nextTickUrl: UrlLike = {
+    pathname: window.location.pathname,
+    search: window.location.search,
+  };
+  if (advancesNow(prevTickUrl, nextTickUrl)) {
+    lastNavigationWasTick = !!opts.tick;
+  }
+  prevTickUrl = nextTickUrl;
+  notifyTick();
   window.dispatchEvent(new Event(NAV_EVENT));
+}
+
+/**
+ * Doctrine: an auto-refresh tick is background activity — it must not
+ * visually interrupt what's already on screen. A view uses this to tell a
+ * tick-caused reload apart from a user-caused one (Run, a param edit,
+ * Back/Forward, a Retry click) and suppress the reload-dim / loading-
+ * placeholder swap for the former while still refetching and still showing
+ * the panel meta's own "Loading…" (LoadingMeta) — the one indicator that's
+ * expected to keep firing on every reload, ticks included.
+ *
+ * A consumer composes it as `(loading && !useTickNavigation()) || startupGap`
+ * — not the other way around — because a startup gap (the services fetch
+ * never having settled, a default-query write still due) can never itself
+ * be tick-caused: a tick is skipped while a fetch it triggered is still in
+ * flight (AGENTS.md), and the very first load is never a navigation at all.
+ * Relying on that implicitly instead of composing it explicitly would leave
+ * the placeholder logic correct by accident rather than by construction.
+ *
+ * The flag reflects the cause of the *current* reload, so it is updated —
+ * set or cleared — only by a navigation `advancesNow` judges could itself
+ * cause one; a view-only navigate() or popstate (fgSearch settling, a
+ * sandwich toggle, a sort click) leaves it exactly as it was. Otherwise a
+ * fetch-irrelevant write landing mid-tick-reload would flip it back to
+ * false and re-arm the dim for the remainder of a reload that is still, in
+ * fact, tick-caused — the exact noise this doctrine exists to remove.
+ *
+ * Also cleared by `markUserReload()`, for a reload that never navigates at
+ * all (`useFetched`'s `retry()`), and by a fetch-relevant `popstate`
+ * (Back/Forward is always the user's own action). With auto-refresh armed,
+ * the flag's steady state between ticks is `true` (the last navigation was
+ * the previous tick), so anything that causes a user-initiated reload
+ * without going through `navigate()` must clear it explicitly, or it
+ * silently inherits the tick's suppression.
+ *
+ * Caveat: RefreshPicker's `fetchesInFlight() > 0` guard closes most, not
+ * all, of the window where a tick could stamp a reload it didn't actually
+ * cause. Between `navigate()` returning and the fetch's own passive effect
+ * starting (a couple of microtasks), `fetchesInFlight()` can still read 0;
+ * a timer due in that exact gap fires, sees nothing in flight yet, and
+ * marks a reload that happens to start in the same instant as tick-caused —
+ * suppressing its dim for that one reload. Rare (a few-millisecond window)
+ * and self-correcting on the next reload; not worth a mechanism change.
+ */
+export function useTickNavigation(): boolean {
+  return useSyncExternalStore(subscribeTick, () => lastNavigationWasTick);
+}
+
+/**
+ * Marks the reload about to start as user-caused, for a reload that never
+ * calls `navigate()` at all — `useFetched`'s `retry()` is the one caller.
+ * Clears the tick flag and notifies `useTickNavigation` subscribers directly
+ * through the tick store's own channel, without dispatching
+ * `pyroscope:navigate`: doing that would advance "now" (`advancesNow`) and
+ * refire every relative-range fetch on screen just to mark one retry as
+ * user-caused, which is not what a Retry click means.
+ */
+export function markUserReload(): void {
+  lastNavigationWasTick = false;
+  notifyTick();
 }
 
 // Bumped on every push-shaped navigation — a real `pushState` above (not a
@@ -121,6 +247,20 @@ export function pushGenerationNow(): number {
 }
 window.addEventListener('popstate', () => {
   pushGeneration += 1;
+  // Mirrors navigate()'s identical advancesNow gate above: Back/Forward
+  // only overrides the tick flag when the popped navigation could itself
+  // cause a reload. A view-only popstate — landing back on an entry that
+  // differs only by fgSearch, say — must not re-arm the dim over a reload
+  // that is still, in fact, tick-caused.
+  const nextTickUrl: UrlLike = {
+    pathname: window.location.pathname,
+    search: window.location.search,
+  };
+  if (advancesNow(prevTickUrl, nextTickUrl)) {
+    lastNavigationWasTick = false;
+  }
+  prevTickUrl = nextTickUrl;
+  notifyTick();
 });
 
 /**

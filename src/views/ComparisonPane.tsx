@@ -6,7 +6,7 @@ import { useTimeline } from '@hooks/useProfileData';
 import { useEditBuffer } from '@hooks/useEditBuffer';
 import { splitQuery } from '../queryLang';
 import { formatPaneWindow, type TimeRange } from '../time';
-import { navigate } from '../urlState';
+import { navigate, useTickNavigation } from '../urlState';
 import type { PaneParams } from './comparisonParams';
 
 // Error banner shared by every view: the message plus, when the hook that
@@ -85,6 +85,11 @@ export function ComparisonPane({
   });
   const { profileTypeID } = splitQuery(pane.query);
   const settlingQuery = !!queryStartupGap && !profileTypeID;
+  // An auto-refresh tick must not visually interrupt (urlState.ts's
+  // useTickNavigation doctrine) — suppresses the chart's reload-dim for a
+  // tick-caused reload while QueryBar's spinner (driven by the full
+  // `loading` below, unchanged) keeps firing on every reload.
+  const tickNav = useTickNavigation();
 
   const [draft, setDraft] = useEditBuffer(pane.query);
 
@@ -157,7 +162,7 @@ export function ComparisonPane({
           startMs={mainRange.start}
           endMs={mainRange.end}
           selection={pane.range}
-          loading={loading || settlingQuery}
+          loading={(loading && !tickNav) || settlingQuery}
           onRangeSelect={(start, end) =>
             navigate({
               set: {

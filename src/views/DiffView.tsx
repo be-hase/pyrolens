@@ -5,6 +5,7 @@ import { Panel } from '@components/Panel';
 import { Button } from '@components/core/Button';
 import { Empty } from '@components/core/Empty';
 import { Loading } from '@components/core/Loading';
+import { LoadingMeta } from '@components/core/LoadingMeta';
 import { parseMaxNodes, profileTypeUnit } from '@api/client';
 import { FlameGraph as GrafanaFlameGraph } from '@lib/flamegraph';
 import {
@@ -14,7 +15,7 @@ import {
 import { useDiffFlamegraph } from '@hooks/useProfileData';
 import { useFlameGraphUrlState } from '@hooks/useFlameGraphUrlState';
 import { defaultQueryPending, splitQuery } from '../queryLang';
-import { navigate, useRoute } from '../urlState';
+import { navigate, useRoute, useTickNavigation } from '../urlState';
 import { ComparisonPane, ErrorBanner } from './ComparisonPane';
 import { swappedPaneParams, useComparisonParams } from './comparisonParams';
 
@@ -79,7 +80,16 @@ export function DiffView({
   const queryStartupGap =
     !servicesSettled || defaultQueryPending(services, params.get('query'));
   const settlingQuery = queryStartupGap && (!leftType || !rightType);
+  // Full loading state — drives the panel meta's "Loading…" (LoadingMeta),
+  // which keeps firing on every reload, ticks included.
   const diffLoading = loading || settlingQuery;
+  // An auto-refresh tick must not visually interrupt (urlState.ts's
+  // useTickNavigation doctrine) — drives the diff area's own visuals: the
+  // reload-dim below and diffEmpty's Loading-vs-Empty choice. `settlingQuery`
+  // is composed in explicitly rather than relied on to never coincide with
+  // a tick — see the doctrine comment for why.
+  const tickNav = useTickNavigation();
+  const diffVisualLoading = (loading && !tickNav) || settlingQuery;
 
   const unit = grafanaUnit(profileTypeUnit(leftType));
   const dataFrame = useMemo(
@@ -94,7 +104,7 @@ export function DiffView({
   // sibling flame graph on screen to lean on. No contextual claim while the
   // banner already shows this fetch's error — see FlameGraph's identical
   // gate.
-  const diffEmpty = diffLoading ? (
+  const diffEmpty = diffVisualLoading ? (
     <Loading />
   ) : typeMismatch ? (
     <Empty
@@ -168,7 +178,7 @@ export function DiffView({
 
       <Panel
         title="Diff flamegraph"
-        meta={diffLoading ? 'Loading…' : undefined}
+        meta={diffLoading ? <LoadingMeta /> : undefined}
       >
         {dataFrame ? (
           <div
@@ -177,7 +187,7 @@ export function DiffView({
               // flight over frames already on screen — the complement of
               // diffEmpty's Loading branch above, which only applies when
               // there's no dataFrame yet. See Loading.css for the class.
-              diffLoading
+              diffVisualLoading
                 ? 'flamegraph-wrapper reload-dim active'
                 : 'flamegraph-wrapper reload-dim'
             }

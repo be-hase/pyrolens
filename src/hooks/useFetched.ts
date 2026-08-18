@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { markUserReload } from '../urlState';
 
 // The one fetch-effect skeleton every data hook shares. The protocol it
 // enforces used to be copy-pasted per call site, and the copies drifted —
@@ -30,7 +31,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 //   participates in the run identity (so the due-but-not-started gap still
 //   counts as loading after a retry), never in `dataKey` (so a retry keeps
 //   showing that key's previous data while it reloads — the same
-//   stale-while-refetching behaviour a deps change gets).
+//   stale-while-refetching behaviour a deps change gets). It also calls
+//   urlState's `markUserReload()` — a Retry click never navigates, but with
+//   auto-refresh armed the tick marker's steady state is otherwise `true`
+//   (see `useTickNavigation`'s doctrine), which would silently suppress
+//   this reload's own dim/placeholder.
 // - `settled` is true once any run — success or failure, for any key — has
 //   completed since mount, and never goes back to false. It is derived from
 //   `dataKey`/`errorKey`: both start `null` and are only ever assigned
@@ -96,7 +101,15 @@ export function useFetched<T>(
   // `dataKey`, so a retry is stale-while-refetching against that key's own
   // previous data, exactly like a deps change is against the key before it.
   const [attempt, setAttempt] = useState(0);
-  const retry = useCallback(() => setAttempt((a) => a + 1), []);
+  const retry = useCallback(() => {
+    // Retry is a user-initiated reload (a click), not a navigation — but
+    // with auto-refresh armed, urlState's tick marker's steady state
+    // between ticks is `true` (see useTickNavigation's doctrine), so
+    // without this a Retry pressed between ticks would silently inherit
+    // the tick's reload-dim/loading-placeholder suppression.
+    markUserReload();
+    setAttempt((a) => a + 1);
+  }, []);
 
   // `load` is a fresh closure every render; the fetch effect reads the
   // latest one through a ref so `deps` alone decide when to refetch. The

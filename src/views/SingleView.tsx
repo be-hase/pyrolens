@@ -3,6 +3,7 @@ import { ControlsBar } from '@components/ControlsBar';
 import { FlameGraph } from '@components/FlameGraph';
 import { Panel } from '@components/Panel';
 import { Button } from '@components/core/Button';
+import { LoadingMeta } from '@components/core/LoadingMeta';
 import { QueryBar } from '@components/QueryBar';
 import { TimeSeries } from '@components/TimeSeries';
 import { useFlamegraph, useTimeline } from '@hooks/useProfileData';
@@ -10,7 +11,7 @@ import { useEditBuffer } from '@hooks/useEditBuffer';
 import { parseMaxNodes, profileTypeLabel } from '@api/client';
 import { defaultQueryPending, parseQuery, splitQuery } from '../queryLang';
 import { formatRangeLabel } from '../time';
-import { navigate, useRoute } from '../urlState';
+import { navigate, useRoute, useTickNavigation } from '../urlState';
 import { ErrorBanner } from './ComparisonPane';
 import { previousPeriodParams } from './comparisonParams';
 
@@ -68,6 +69,15 @@ export function SingleView({
     (!servicesSettled || defaultQueryPending(services, params.get('query'))) &&
     !profileTypeID;
 
+  // An auto-refresh tick is background activity — it must not visually
+  // interrupt what's on screen (see urlState.ts's useTickNavigation
+  // doctrine). The chart visuals below use this composition; the panel
+  // metas just above/below keep using the full `tl.loading`/`fg.loading` so
+  // the small "Loading…" indicator still fires on every reload, ticks
+  // included. `settlingQuery` is composed in explicitly rather than relied
+  // on to never coincide with a tick — see the doctrine comment for why.
+  const tickNav = useTickNavigation();
+
   const [draft, setDraft] = useEditBuffer(query);
 
   return (
@@ -97,7 +107,9 @@ export function SingleView({
 
       <Panel
         title="Timeline"
-        meta={tl.loading ? 'Loading…' : formatRangeLabel(from, until, range)}
+        meta={
+          tl.loading ? <LoadingMeta /> : formatRangeLabel(from, until, range)
+        }
       >
         <TimeSeries
           data={tl.timeline}
@@ -105,7 +117,7 @@ export function SingleView({
           profileTypeId={profileTypeID}
           startMs={range.start}
           endMs={range.end}
-          loading={tl.loading || settlingQuery}
+          loading={(tl.loading && !tickNav) || settlingQuery}
           onRangeSelect={(start, end) =>
             navigate({ set: { from: String(start), until: String(end) } })
           }
@@ -149,17 +161,17 @@ export function SingleView({
           ) : undefined
         }
         meta={
-          fg.loading
-            ? 'Loading…'
-            : parsed
-              ? `${parsed.service} · ${profileTypeLabel(parsed.profileType)}`
-              : undefined
+          fg.loading ? (
+            <LoadingMeta />
+          ) : parsed ? (
+            `${parsed.service} · ${profileTypeLabel(parsed.profileType)}`
+          ) : undefined
         }
       >
         <FlameGraph
           data={fg.flamegraph}
           profileTypeId={profileTypeID}
-          loading={fg.loading || settlingQuery}
+          loading={(fg.loading && !tickNav) || settlingQuery}
           // Suppressed while fg has its own error: the banner above already
           // explains it, and offering "no profiles matched" plus an action
           // that widens the range would misstate a fetch failure as an
