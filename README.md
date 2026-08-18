@@ -36,7 +36,9 @@ brings the classic workflow back, plus a few things the old UI never had:
 ## The views
 
 **Diff** — what got slower between two windows, ranked. Here the injected
-`slowRegression` frame jumps out at `+1023%`, red in the flame graph.
+`slowRegression` frame jumps out at `+1023%`, red in the flame graph. Because
+the diff is one query over both windows, Diff has a single Run above the
+panes that commits both edits at once, instead of a Run per pane.
 
 ![Diff view](docs/screenshots/diff-dark.png)
 

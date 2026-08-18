@@ -25,6 +25,21 @@ vi.mock('@api/client', async (importOriginal) => {
   };
 });
 
+// The single global Run's tests below need to see exactly what DiffView
+// passes to `navigate()` — in particular, that a side never edited is
+// omitted from `set` entirely rather than written with its resolved value
+// (the absence-inherits invariant, AGENTS.md) and that an all-absent `set`
+// still fires. Wrapping the real implementation (not replacing it) keeps
+// every other test in this file exercising real navigation/URL behavior
+// unchanged.
+vi.mock('../urlState.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../urlState.ts')>();
+  return {
+    ...actual,
+    navigate: vi.fn(actual.navigate),
+  };
+});
+
 // jsdom has no ResizeObserver (see AGENTS.md's "Verifying a change"); the
 // pane timelines observe their container to size the canvas backing store.
 class StubResizeObserver {
@@ -48,6 +63,7 @@ vi.mock('@lib/flamegraph', async (importOriginal) => {
 
 const diffOf = vi.mocked(fetchDiffFlamegraph);
 const timelineOf = vi.mocked(fetchTimeline);
+const navigateSpy = vi.mocked(navigate);
 
 const CPU = 'process_cpu:cpu:nanoseconds:cpu:nanoseconds';
 const ALLOC = 'memory:alloc_objects:count:space:bytes';
@@ -102,9 +118,9 @@ describe('DiffView profile-type mismatch', () => {
 
     render(<DiffView {...PROPS} />);
 
-    // Both pane timelines still fetch independently (see ComparisonPane) —
-    // it is only the Diff RPC, which assumes matching types, that must be
-    // withheld.
+    // Both pane timelines still fetch independently (DiffView lifts them
+    // itself now) — it is only the Diff RPC, which assumes matching types,
+    // that must be withheld.
     await waitFor(() => assert.equal(timelineOf.mock.calls.length, 2));
     assert.equal(diffOf.mock.calls.length, 0);
 
@@ -483,5 +499,132 @@ describe('DiffView due-navigation gap before the default query lands (FINDING 3)
         /No profiles matched this query in the baseline or comparison window/,
       ),
     );
+  });
+});
+
+// The diff flame graph is one joint query over both panes, so per-pane Run
+// buttons are misleading here — a single Run above the panes replaces them
+// and commits both drafts in one navigation. See ComparisonView's identical
+// per-pane Run, unchanged there.
+describe('DiffView: a single Run button replaces the per-pane ones', () => {
+  it("hides each pane's own Run button and renders exactly one global Run", async () => {
+    render(<DiffView {...PROPS} />);
+    await waitFor(() => assert.equal(diffOf.mock.calls.length, 1));
+
+    assert.equal(
+      screen.queryAllByRole('button', { name: /^Run$/ }).length,
+      1,
+      'expected exactly one Run button on Diff — the global one above the ' +
+        'panes — with both per-pane Run buttons hidden',
+    );
+  });
+});
+
+describe('DiffView: Enter in a pane still commits that pane alone', () => {
+  it('pressing Enter in the Baseline query bar writes leftQuery only, unaffected by the global Run', async () => {
+    render(<DiffView {...PROPS} />);
+    await waitFor(() => assert.equal(diffOf.mock.calls.length, 1));
+
+    const baselinePanel = screen
+      .getByText('Baseline')
+      .closest<HTMLElement>('.panel')!;
+    const input = within(baselinePanel).getByRole(
+      'combobox',
+    ) as HTMLInputElement;
+    const edited = `{service_name="checkout", profile_type="${CPU}"}`;
+    fireEvent.change(input, {
+      target: { value: edited, selectionStart: edited.length },
+    });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() =>
+      assert.equal(
+        new URLSearchParams(window.location.search).get('leftQuery'),
+        edited,
+      ),
+    );
+    assert.equal(
+      new URLSearchParams(window.location.search).has('rightQuery'),
+      false,
+    );
+  });
+});
+
+describe('DiffView: the single global Run', () => {
+  it("commits only the edited side in one navigation — the untouched side's inherited value is never materialized — and refetches once", async () => {
+    render(<DiffView {...PROPS} />);
+    await waitFor(() => assert.equal(diffOf.mock.calls.length, 1));
+    const diffCallsBefore = diffOf.mock.calls.length;
+    const timelineCallsBefore = timelineOf.mock.calls.length;
+
+    const baselinePanel = screen
+      .getByText('Baseline')
+      .closest<HTMLElement>('.panel')!;
+    const input = within(baselinePanel).getByRole(
+      'combobox',
+    ) as HTMLInputElement;
+    const edited = `{service_name="checkout", profile_type="${CPU}"}`;
+    // Fill the draft but do NOT press Enter — only the global Run should
+    // commit it.
+    fireEvent.change(input, {
+      target: { value: edited, selectionStart: edited.length },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^Run$/ }));
+
+    await waitFor(() =>
+      assert.equal(
+        new URLSearchParams(window.location.search).get('leftQuery'),
+        edited,
+      ),
+    );
+    assert.equal(
+      new URLSearchParams(window.location.search).has('rightQuery'),
+      false,
+      'the right pane was never edited — its inherited value must not be ' +
+        'written as an override',
+    );
+    assert.equal(navigateSpy.mock.calls.length, 1);
+    assert.deepEqual(navigateSpy.mock.calls[0][0], {
+      set: { leftQuery: edited },
+    });
+
+    // Exactly one refetch each: only the left pane's query changed, so only
+    // its timeline refires; the diff fetch refires once because it depends
+    // on both queries.
+    await waitFor(() =>
+      assert.equal(diffOf.mock.calls.length, diffCallsBefore + 1),
+    );
+    await waitFor(() =>
+      assert.equal(timelineOf.mock.calls.length, timelineCallsBefore + 1),
+    );
+  });
+
+  it('still navigates with an empty set — the write that makes Run a real refresh — when neither draft was touched', async () => {
+    render(<DiffView {...PROPS} />);
+    await waitFor(() => assert.equal(diffOf.mock.calls.length, 1));
+
+    fireEvent.click(screen.getByRole('button', { name: /^Run$/ }));
+
+    await waitFor(() => assert.equal(navigateSpy.mock.calls.length, 1));
+    assert.deepEqual(navigateSpy.mock.calls[0][0], { set: {} });
+    assert.equal(
+      new URLSearchParams(window.location.search).has('leftQuery'),
+      false,
+    );
+    assert.equal(
+      new URLSearchParams(window.location.search).has('rightQuery'),
+      false,
+    );
+  });
+
+  it('stays busy while the diff fetch is pending', async () => {
+    diffOf.mockReturnValue(new Promise(() => {}));
+    render(<DiffView {...PROPS} />);
+    await waitFor(() => assert.equal(diffOf.mock.calls.length, 1));
+
+    const runButton = screen.getByRole('button', { name: /^Run$/ });
+    assert.equal((runButton as HTMLButtonElement).disabled, true);
+    assert.equal(runButton.getAttribute('aria-busy'), 'true');
   });
 });

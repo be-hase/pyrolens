@@ -2,8 +2,8 @@ import type { ViewProps } from '../App';
 import { ControlsBar } from '@components/ControlsBar';
 import { FlameGraph } from '@components/FlameGraph';
 import { Button } from '@components/core/Button';
-import { useFlamegraph } from '@hooks/useProfileData';
-import { parseMaxNodes } from '@api/client';
+import { useFlamegraph, useTimeline } from '@hooks/useProfileData';
+import { parseMaxNodes, type FlamegraphData } from '@api/client';
 import { defaultQueryPending, splitQuery } from '../queryLang';
 import { navigate, useRoute, useTickNavigation } from '../urlState';
 import { ComparisonPane, ErrorBanner } from './ComparisonPane';
@@ -25,21 +25,31 @@ function isLast24h(from: string, until: string): boolean {
 }
 
 function PaneFlamegraph({
+  flamegraph,
+  loading,
+  error,
+  retry,
   pane,
-  tenantID,
   from,
   until,
-  maxNodes,
   queryStartupGap,
 }: {
+  /**
+   * Fetched by the parent (ComparisonView), not in here — the pane's Run
+   * button needs to see this fetch's `loading` too (a Run reflects every
+   * fetch its commit would supersede: this pane's timeline AND its flame
+   * graph), so it is lifted to where both the button and this panel can
+   * read the same fetch instead of a second call site duplicating it.
+   */
+  flamegraph: FlamegraphData;
+  loading: boolean;
+  error: string | null;
+  retry?: () => void;
   pane: PaneParams;
-  tenantID?: string;
   /** Main view range, not the pane's own brushed sub-range — "Last 24
    * hours" widens the range everything is brushed against. */
   from: string;
   until: string;
-  /** Caps the node count per pane's query; server default when unset. */
-  maxNodes?: number;
   /**
    * Whether the main query hasn't resolved to something real yet — either
    * the services fetch has never settled, or it has and a default-query
@@ -50,12 +60,6 @@ function PaneFlamegraph({
    */
   queryStartupGap?: boolean;
 }) {
-  const { flamegraph, loading, error, retry } = useFlamegraph({
-    query: pane.query,
-    range: pane.range,
-    tenantID,
-    maxNodes,
-  });
   const { profileTypeID } = splitQuery(pane.query);
   // Startup gap: before the main query resolves, an inheriting pane's query
   // is still the unset main query, so `profileTypeID` is empty because
@@ -143,6 +147,26 @@ export function ComparisonView({
   const queryStartupGap =
     !servicesSettled || defaultQueryPending(services, params.get('query'));
 
+  // Lifted here (rather than fetched inside ComparisonPane/PaneFlamegraph)
+  // so a pane's Run button can reflect BOTH its timeline and its flame
+  // graph fetch — the button lives in ComparisonPane, the flame graph fetch
+  // used to live entirely inside PaneFlamegraph, and neither could see the
+  // other's `loading` without one of them fetching twice.
+  const leftTl = useTimeline({ query: left.query, range, tenantID });
+  const rightTl = useTimeline({ query: right.query, range, tenantID });
+  const leftFg = useFlamegraph({
+    query: left.query,
+    range: left.range,
+    tenantID,
+    maxNodes,
+  });
+  const rightFg = useFlamegraph({
+    query: right.query,
+    range: right.range,
+    tenantID,
+    maxNodes,
+  });
+
   return (
     <div className="app-content">
       <ControlsBar
@@ -177,13 +201,20 @@ export function ComparisonView({
           mainFrom={from}
           tenantID={tenantID}
           queryStartupGap={queryStartupGap}
+          timeline={leftTl.timeline}
+          loading={leftTl.loading}
+          error={leftTl.error}
+          retry={leftTl.retry}
+          extraLoading={leftFg.loading}
         >
           <PaneFlamegraph
+            flamegraph={leftFg.flamegraph}
+            loading={leftFg.loading}
+            error={leftFg.error}
+            retry={leftFg.retry}
             pane={left}
-            tenantID={tenantID}
             from={from}
             until={until}
-            maxNodes={maxNodes}
             queryStartupGap={queryStartupGap}
           />
         </ComparisonPane>
@@ -194,13 +225,20 @@ export function ComparisonView({
           mainFrom={from}
           tenantID={tenantID}
           queryStartupGap={queryStartupGap}
+          timeline={rightTl.timeline}
+          loading={rightTl.loading}
+          error={rightTl.error}
+          retry={rightTl.retry}
+          extraLoading={rightFg.loading}
         >
           <PaneFlamegraph
+            flamegraph={rightFg.flamegraph}
+            loading={rightFg.loading}
+            error={rightFg.error}
+            retry={rightFg.retry}
             pane={right}
-            tenantID={tenantID}
             from={from}
             until={until}
-            maxNodes={maxNodes}
             queryStartupGap={queryStartupGap}
           />
         </ComparisonPane>

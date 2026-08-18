@@ -6,14 +6,16 @@ import { Button } from '@components/core/Button';
 import { Empty } from '@components/core/Empty';
 import { Loading } from '@components/core/Loading';
 import { LoadingMeta } from '@components/core/LoadingMeta';
+import { RunButton } from '@components/QueryBar';
 import { parseMaxNodes, profileTypeUnit } from '@api/client';
 import { FlameGraph as GrafanaFlameGraph } from '@lib/flamegraph';
 import {
   diffFlamebearerToDataFrame,
   grafanaUnit,
 } from '@components/flamebearer';
-import { useDiffFlamegraph } from '@hooks/useProfileData';
+import { useDiffFlamegraph, useTimeline } from '@hooks/useProfileData';
 import { useFlameGraphUrlState } from '@hooks/useFlameGraphUrlState';
+import { useEditBuffer } from '@hooks/useEditBuffer';
 import { defaultQueryPending, splitQuery } from '../queryLang';
 import { navigate, useRoute, useTickNavigation } from '../urlState';
 import { ComparisonPane, ErrorBanner } from './ComparisonPane';
@@ -56,6 +58,35 @@ export function DiffView({
     tenantID,
     maxNodes,
   });
+
+  // Lifted here (rather than fetched inside ComparisonPane) so the single
+  // global Run's busy state — the diff fetch OR either pane timeline's
+  // `loading` — can see both without a second fetch call site. DiffView
+  // hides each pane's own Run button (the diff flame graph is one joint
+  // query over both panes, so a per-pane Run there would be misleading);
+  // this is also what lets the global Run's click handler read each pane's
+  // draft without lifting it out of an edit buffer's reset-on-URL-change
+  // logic — see the two `useEditBuffer` calls below.
+  const leftTl = useTimeline({ query: left.query, range, tenantID });
+  const rightTl = useTimeline({ query: right.query, range, tenantID });
+  // DiffView owns both drafts (rather than each ComparisonPane owning its
+  // own, as Comparison does) so the global Run can read what the user
+  // typed in either pane without it having navigated yet.
+  const [leftDraft, setLeftDraft] = useEditBuffer(left.query);
+  const [rightDraft, setRightDraft] = useEditBuffer(right.query);
+  const globalRunLoading = loading || leftTl.loading || rightTl.loading;
+  const onGlobalRun = () => {
+    // Absence-inherits invariant (AGENTS.md): a side the user never edited
+    // must not have its inherited value materialized into an override —
+    // only write `<side>Query` when the draft actually differs from that
+    // pane's currently resolved query. An entirely empty `set` must still
+    // navigate (advances "now" — urlState.ts — which is what makes Run a
+    // real refresh even when nothing changed).
+    const set: Record<string, string | null | undefined> = {};
+    if (leftDraft !== left.query) set.leftQuery = leftDraft;
+    if (rightDraft !== right.query) set.rightQuery = rightDraft;
+    navigate({ set });
+  };
 
   const leftType = splitQuery(left.query).profileTypeID;
   const rightType = splitQuery(right.query).profileTypeID;
@@ -154,6 +185,12 @@ export function DiffView({
         >
           Swap sides
         </Button>
+        {/* The diff flame graph is one joint query over both panes, so a
+            per-pane Run would misleadingly suggest it alone refreshes
+            anything — one prominent Run here commits both drafts at once
+            instead. Right of Swap sides, same row, matching the main
+            QueryBar's Run styling/icon (RunButton). */}
+        <RunButton loading={globalRunLoading} onClick={onGlobalRun} />
       </div>
       <div className="comparison-grid">
         <ComparisonPane
@@ -163,6 +200,13 @@ export function DiffView({
           mainFrom={from}
           tenantID={tenantID}
           queryStartupGap={queryStartupGap}
+          timeline={leftTl.timeline}
+          loading={leftTl.loading}
+          error={leftTl.error}
+          retry={leftTl.retry}
+          draft={leftDraft}
+          onDraftChange={setLeftDraft}
+          hideRunButton
         />
         <ComparisonPane
           title="Comparison"
@@ -171,6 +215,13 @@ export function DiffView({
           mainFrom={from}
           tenantID={tenantID}
           queryStartupGap={queryStartupGap}
+          timeline={rightTl.timeline}
+          loading={rightTl.loading}
+          error={rightTl.error}
+          retry={rightTl.retry}
+          draft={rightDraft}
+          onDraftChange={setRightDraft}
+          hideRunButton
         />
       </div>
 

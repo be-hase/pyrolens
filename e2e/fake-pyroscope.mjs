@@ -91,6 +91,12 @@ const server = createServer(async (req, res) => {
     groupBy: request.groupBy ?? null,
     profileTypeID: request.profileTypeID ?? request.left?.profileTypeID ?? null,
     labelSelector: request.labelSelector ?? request.left?.labelSelector ?? null,
+    // Diff nests a labelSelector inside each side's query object, same as
+    // maxNodes below — the generic `labelSelector` above only ever surfaces
+    // the left one, so a test that needs to see both sides (e.g. the global
+    // Run on Diff committing only one edited side) needs these instead.
+    leftLabelSelector: request.left?.labelSelector ?? null,
+    rightLabelSelector: request.right?.labelSelector ?? null,
     start: request.start ?? request.left?.start ?? null,
     end: request.end ?? request.left?.end ?? null,
     step: request.step ?? null,
