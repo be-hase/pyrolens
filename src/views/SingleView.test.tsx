@@ -71,6 +71,10 @@ describe('SingleView maxNodes wiring', () => {
   it('renders the Max nodes slider in ControlsBar', () => {
     render(<SingleView {...PROPS} />);
     assert.ok(screen.getByRole('slider', { name: 'Max nodes' }));
+    // The accessible name now comes from this same visible label
+    // (aria-labelledby, see MaxNodesControl.tsx) rather than a separate
+    // aria-label string — a single source for both.
+    assert.ok(screen.getByText('Max nodes'));
   });
 });
 

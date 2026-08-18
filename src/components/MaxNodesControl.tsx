@@ -1,9 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Slider } from '@components/core/Slider';
 import { parseMaxNodes } from '@api/client';
 import { useDebouncedValue } from '@hooks/useDebouncedValue';
 import { useEditBuffer } from '@hooks/useEditBuffer';
 import { navigate, useRoute } from '../urlState';
+import './MaxNodesControl.css';
+
+const TOOLTIP =
+  'Caps flame graph detail per query — lower is lighter and faster; ' +
+  "Default uses the server's own limit.";
 
 // Trailing debounce before a commit reaches the URL. Slider's onCommit
 // fires once per native `change` event, and keyboard auto-repeat dispatches
@@ -15,15 +20,21 @@ import { navigate, useRoute } from '../urlState';
 // just after this delay instead of immediately.
 const COMMIT_DEBOUNCE_MS = 350;
 
-// Discrete presets, left to right; the slider itself moves over their
-// indexes (0..PRESETS.length), not the node counts, so a plain
-// <input type="range"> with step 1 is enough. The rightmost index has no
-// entry here — it means "no maxNodes param", i.e. the server's own default.
+// Discrete presets, ascending. Default sits at the LEFT end (index 0, no
+// maxNodes param), PRESETS[0..7] fill indexes 1..8 — not the more obvious
+// "Default trails the ascending presets" layout — so that fiddling with the
+// slider (an accidental drag, a stray key) biases toward a SMALLER cap, or
+// none at all, never a larger one: index 0 is a hard stop (native range
+// input already refuses to go below `min`; MaxNodesControl.test.tsx pins
+// this), and every step right only ever increases the cap or leaves Default
+// behind. The slider itself moves over indexes (0..PRESETS.length), not the
+// node counts, so a plain <input type="range"> with step 1 is enough.
 const PRESETS = [512, 1024, 2048, 4096, 8192, 16384, 32768, 65536];
-const LABELS = ['512', '1k', '2k', '4k', '8k', '16k', '32k', '64k', 'Default'];
-const DEFAULT_INDEX = PRESETS.length;
+const LABELS = ['Default', '512', '1k', '2k', '4k', '8k', '16k', '32k', '64k'];
+const DEFAULT_INDEX = 0;
 
-// Maps a resolved maxNodes value to its slider index. An exact preset match
+// Maps a resolved maxNodes value to its slider index (PRESETS[i] lives at
+// slider index i+1 — see the layout note above). An exact preset match
 // lands on its own slot; anything else — a hand-edited URL, or a value the
 // classic UI wrote — snaps to the closest preset rather than reporting
 // "Default" for a cap that is, in fact, still being sent to the server.
@@ -38,7 +49,7 @@ function indexForMaxNodes(maxNodes: number | undefined): number {
       best = i;
     }
   });
-  return best;
+  return best + 1;
 }
 
 // Max nodes slider, rendered in ControlsBar on the flame-graph views (Single,
@@ -52,6 +63,7 @@ function indexForMaxNodes(maxNodes: number | undefined): number {
 // than the raw param string, so a URL change that still resolves to the same
 // index does not spuriously reset an in-progress drag.
 export function MaxNodesControl() {
+  const labelId = useId();
   const { params } = useRoute();
   const committedIndex = indexForMaxNodes(
     parseMaxNodes(params.get('maxNodes')),
@@ -104,30 +116,39 @@ export function MaxNodesControl() {
     if (pending.index === committedIndex) return;
     navigate({
       set: {
+        // PRESETS[i] lives at slider index i+1 (index 0 is Default), so the
+        // reverse lookup shifts by one — the mirror image of
+        // indexForMaxNodes's `+ 1`.
         maxNodes:
           pending.index === DEFAULT_INDEX
             ? null
-            : String(PRESETS[pending.index]),
+            : String(PRESETS[pending.index - 1]),
       },
     });
   }, [debouncedPending, pending, committedIndex]);
 
   return (
-    <Slider
-      min={0}
-      max={DEFAULT_INDEX}
-      value={draftIndex}
-      label="Max nodes"
-      valueText={LABELS[draftIndex]}
-      onInput={(index) => setDraftStr(String(index))}
-      onCommit={(index) => {
-        commitGeneration.current += 1;
-        setPending({
-          index,
-          baseline: committedIndex,
-          gen: commitGeneration.current,
-        });
-      }}
-    />
+    <div className="max-nodes-control" title={TOOLTIP}>
+      <span className="max-nodes-control-label" id={labelId}>
+        Max nodes
+      </span>
+      <Slider
+        min={0}
+        max={PRESETS.length}
+        value={draftIndex}
+        label="Max nodes"
+        labelledBy={labelId}
+        valueText={LABELS[draftIndex]}
+        onInput={(index) => setDraftStr(String(index))}
+        onCommit={(index) => {
+          commitGeneration.current += 1;
+          setPending({
+            index,
+            baseline: committedIndex,
+            gen: commitGeneration.current,
+          });
+        }}
+      />
+    </div>
   );
 }

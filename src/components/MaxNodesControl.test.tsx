@@ -33,6 +33,9 @@ function countNavigations() {
 // React sets a controlled input's position via the `.value` DOM property,
 // not the `value` attribute — `getAttribute('value')` would only ever show
 // the initial render (or nothing), so every read goes through the property.
+// The accessible name now comes from the visible "Max nodes" label
+// (Slider's aria-labelledby, see MaxNodesControl.tsx) rather than a
+// duplicate aria-label string, so this query also proves that wiring.
 const slider = () =>
   screen.getByRole('slider', { name: 'Max nodes' }) as HTMLInputElement;
 
@@ -46,19 +49,50 @@ afterEach(() => {
 });
 
 describe('MaxNodesControl', () => {
-  it('renders at the Default (rightmost) position with no maxNodes param', () => {
+  it('renders at Default (index 0, the LEFT end) with no maxNodes param', () => {
     render(<MaxNodesControl />);
     const el = slider();
-    assert.equal(el.value, '8');
+    assert.equal(el.value, '0');
     assert.equal(el.getAttribute('aria-valuetext'), 'Default');
   });
 
-  it('renders at the matching preset position for ?maxNodes=4096', () => {
+  it('renders a visible "Max nodes" label and a tooltip explaining the control', () => {
+    render(<MaxNodesControl />);
+    assert.ok(screen.getByText('Max nodes'));
+    const wrapper = document.querySelector('.max-nodes-control');
+    assert.ok(wrapper?.getAttribute('title'));
+  });
+
+  it('renders at the matching preset position for ?maxNodes=4096 (index 4: Default=0, then presets ascending)', () => {
     at('/?maxNodes=4096');
     render(<MaxNodesControl />);
     const el = slider();
-    assert.equal(el.value, '3');
+    assert.equal(el.value, '4');
     assert.equal(el.getAttribute('aria-valuetext'), '4k');
+  });
+
+  it('ArrowLeft from Default is a hard stop: it cannot go below index 0 and never navigates', () => {
+    // jsdom does not implement a range input's native "arrow key decrements
+    // by step" browser behaviour, so a dispatched ArrowLeft keydown would be
+    // a no-op regardless of whether the app is correct — it would prove
+    // nothing either way. What IS testable, and is the same clamp ArrowLeft
+    // relies on, is the input's value-sanitization algorithm: a native
+    // range input clamps any assigned value to [min, max], so attempting to
+    // move below `min={0}` exercises the identical hard stop.
+    render(<MaxNodesControl />);
+    const nav = countNavigations();
+    const el = slider();
+    assert.equal(el.value, '0');
+
+    fireEvent.input(el, { target: { value: '-1' } });
+    assert.equal(el.value, '0');
+    fireEvent.change(el, { target: { value: '-1' } });
+    act(() => vi.advanceTimersByTime(COMMIT_DEBOUNCE_MS));
+
+    assert.equal(nav.count, 0);
+    assert.equal(params().has('maxNodes'), false);
+
+    nav.cleanup();
   });
 
   it('dragging (input events) updates the label live but does not navigate, even after the commit debounce would have elapsed', () => {
@@ -66,9 +100,9 @@ describe('MaxNodesControl', () => {
     const nav = countNavigations();
     const el = slider();
 
-    fireEvent.input(el, { target: { value: '2' } });
-    assert.equal(el.getAttribute('aria-valuetext'), '2k');
-    assert.equal(screen.getByText('2k').textContent, '2k');
+    fireEvent.input(el, { target: { value: '5' } });
+    assert.equal(el.getAttribute('aria-valuetext'), '8k');
+    assert.equal(screen.getByText('8k').textContent, '8k');
     assert.equal(nav.count, 0);
     assert.equal(params().has('maxNodes'), false);
 
@@ -97,7 +131,7 @@ describe('MaxNodesControl', () => {
 
     act(() => vi.advanceTimersByTime(1));
     assert.equal(nav.count, 1);
-    assert.equal(params().get('maxNodes'), '16384');
+    assert.equal(params().get('maxNodes'), '8192');
 
     nav.cleanup();
   });
@@ -108,8 +142,8 @@ describe('MaxNodesControl', () => {
     const el = slider();
 
     // Simulates holding an arrow key: auto-repeat fires input+change on
-    // every repeat tick, well inside the debounce window. Index 8 -> 5.
-    for (const v of ['7', '6', '5']) {
+    // every repeat tick, well inside the debounce window. Index 0 -> 3.
+    for (const v of ['1', '2', '3']) {
       fireEvent.input(el, { target: { value: v } });
       fireEvent.change(el, { target: { value: v } });
     }
@@ -120,7 +154,7 @@ describe('MaxNodesControl', () => {
     // Exactly one navigation, carrying only the last value in the burst —
     // a regression that committed per tick would show up here as 3.
     assert.equal(nav.count, 1);
-    assert.equal(params().get('maxNodes'), '16384');
+    assert.equal(params().get('maxNodes'), '2048');
 
     nav.cleanup();
   });
@@ -130,7 +164,7 @@ describe('MaxNodesControl', () => {
     render(<MaxNodesControl />);
     const el = slider();
 
-    fireEvent.change(el, { target: { value: '8' } });
+    fireEvent.change(el, { target: { value: '0' } });
     act(() => vi.advanceTimersByTime(COMMIT_DEBOUNCE_MS));
 
     assert.equal(params().has('maxNodes'), false);
@@ -140,7 +174,7 @@ describe('MaxNodesControl', () => {
     at('/?maxNodes=1024');
     render(<MaxNodesControl />);
     const el = slider();
-    assert.equal(el.value, '1');
+    assert.equal(el.value, '2');
 
     // Mid-drag: only an `input` fired, nothing committed yet.
     fireEvent.input(el, { target: { value: '6' } });
@@ -150,7 +184,7 @@ describe('MaxNodesControl', () => {
     // out from under the in-progress drag.
     act(() => navigate({ set: { maxNodes: '8192' } }));
 
-    assert.equal(el.value, '4');
+    assert.equal(el.value, '5');
     assert.equal(el.getAttribute('aria-valuetext'), '8k');
   });
 
@@ -159,8 +193,8 @@ describe('MaxNodesControl', () => {
     const nav = countNavigations();
     const el = slider();
 
-    // Commits a change to index 3 (4096); the debounce starts, targeting a
-    // world where maxNodes is still absent (committedIndex 8 = Default).
+    // Commits a change to index 3 (2048); the debounce starts, targeting a
+    // world where maxNodes is still absent (committedIndex 0 = Default).
     fireEvent.input(el, { target: { value: '3' } });
     fireEvent.change(el, { target: { value: '3' } });
     assert.equal(nav.count, 0);
@@ -169,12 +203,12 @@ describe('MaxNodesControl', () => {
     // useEditBuffer resets the draft to follow it.
     act(() => navigate({ set: { maxNodes: '1024' } }));
     assert.equal(nav.count, 1);
-    assert.equal(el.value, '1');
+    assert.equal(el.value, '2');
 
     // The pending commit's debounce elapses now. It must not fire and
-    // silently overwrite the external write with the stale value 4096 —
-    // pendingBaseline (captured as 8 at commit time) no longer matches
-    // committedIndex (now 1), so MaxNodesControl drops it instead of
+    // silently overwrite the external write with the stale value 2048 —
+    // pendingBaseline (captured as 0 at commit time) no longer matches
+    // committedIndex (now 2), so MaxNodesControl drops it instead of
     // navigating.
     act(() => vi.advanceTimersByTime(COMMIT_DEBOUNCE_MS));
     assert.equal(nav.count, 1);

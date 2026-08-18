@@ -1,0 +1,60 @@
+.max-nodes-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 35px;
+}
+
+.max-nodes-control-label {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+/* Sets the Default slot (index 0) apart from the ascending presets with a
+   few-px break in the track, like `--| ------------` — so a stray nudge
+   away from Default reads as "now capped, starting from the smallest
+   preset", not just a number that happened to change. The break sits at the
+   THUMB's position for value 0.5 (the boundary between step 0 and step 1),
+   which is not simply 0.5/8 = 6.25% of the track's own box: the track box
+   is wider than the thumb's actual travel, since a native range input insets
+   travel by half the thumb's width on each end (Slider.css fixes the track
+   at 130px and the thumb at 14px). A gradient's stops can mix percentages
+   and lengths freely, so the boundary is written directly as a length
+   instead of first converting to a percentage of the box:
+     inset  = thumbWidth / 2                = 7px
+     travel = trackWidth - thumbWidth       = 116px
+     center = inset + (0.5 / 8) * travel    = 14.25px
+   This is the formula's answer, not a screenshot-verified one — nudge the
+   two `14.25px` stops below (kept as one repeated literal on purpose, so a
+   correction only has to change one number in each rule) if it drifts
+   visibly off the boundary.
+   Scoped to .max-nodes-control's own track rather than Slider.css: this
+   geometry (index 0/1, a 0..8 axis) is specific to the 9-step Max nodes
+   slider, not something every future Slider should carry. Two separate
+   rules, not one comma-joined with ::-moz-range-track, for the same reason
+   Slider.css's focus rule is split — a selector list is invalid as a whole
+   the moment one selector in it is unsupported, and each vendor only
+   recognizes its own pseudo-element. */
+.max-nodes-control .slider-input::-webkit-slider-runnable-track {
+  background: linear-gradient(
+    to right,
+    var(--border-weak) 0,
+    var(--border-weak) calc(14.25px - 2px),
+    var(--bg-body) calc(14.25px - 2px),
+    var(--bg-body) calc(14.25px + 2px),
+    var(--border-medium) calc(14.25px + 2px),
+    var(--border-medium) 100%
+  );
+}
+
+.max-nodes-control .slider-input::-moz-range-track {
+  background: linear-gradient(
+    to right,
+    var(--border-weak) 0,
+    var(--border-weak) calc(14.25px - 2px),
+    var(--bg-body) calc(14.25px - 2px),
+    var(--bg-body) calc(14.25px + 2px),
+    var(--border-medium) calc(14.25px + 2px),
+    var(--border-medium) 100%
+  );
+}

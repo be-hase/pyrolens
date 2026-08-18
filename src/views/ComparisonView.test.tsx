@@ -57,6 +57,10 @@ describe('ComparisonView ControlsBar', () => {
   it('renders the Max nodes slider', () => {
     render(<ComparisonView {...PROPS} />);
     assert.ok(screen.getByRole('slider', { name: 'Max nodes' }));
+    // The accessible name now comes from this same visible label
+    // (aria-labelledby, see MaxNodesControl.tsx) rather than a separate
+    // aria-label string — a single source for both.
+    assert.ok(screen.getByText('Max nodes'));
   });
 });
 

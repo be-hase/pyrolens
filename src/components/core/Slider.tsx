@@ -19,6 +19,7 @@ export function Slider({
   step = 1,
   value,
   label,
+  labelledBy,
   valueText,
   onInput,
   onCommit,
@@ -29,8 +30,16 @@ export function Slider({
   /** Current position, already resolved (draft while dragging, committed
    * otherwise) — this component holds no state of its own. */
   value: number;
-  /** Accessible name; the visible label is the caller's `valueText` slot. */
+  /** Accessible name, used when there is no visible label element to point
+   * `labelledBy` at. Always required (even alongside `labelledBy`) so a
+   * caller adding one later has a working fallback name in the meantime. */
   label: string;
+  /** Id of a visible element (typically a <span>) that names the control —
+   * takes over from `label` as the actual accessible name (aria-labelledby
+   * wins over aria-label) so sighted and assistive-tech users read the same
+   * text as the single source, rather than a visible label and a duplicate
+   * aria-label string that could drift apart. */
+  labelledBy?: string;
   /** Read out by assistive tech in place of the raw numeric value, and
    * shown next to the track. */
   valueText: string;
@@ -69,7 +78,8 @@ export function Slider({
         max={max}
         step={step}
         value={value}
-        aria-label={label}
+        aria-label={labelledBy ? undefined : label}
+        aria-labelledby={labelledBy}
         aria-valuetext={valueText}
         onInput={(e) => onInput(Number(e.currentTarget.value))}
       />
