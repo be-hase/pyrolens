@@ -11,43 +11,81 @@
 }
 
 /* Sets Default (index 0) apart from the ascending presets as a small DOT
-   sitting outside the continuous track, like `・————`, rather than the
+   sitting outside the continuous track, like `・ ●————`, rather than the
    earlier recessed-segment design (`--| ------------`): a single point
    outside the range reads truer than a mini track of its own — Default
-   isn't "the smallest cap", it's "no cap at all". Two gradient layers on
-   the track's `background`, dot on top (layer order matters: an opaque
-   layer later in the list paints over an earlier one wherever both are
-   opaque, so the dot has to be listed first or the track layer, though
-   transparent under it by construction, would be one more thing that could
-   silently start hiding it after an edit):
+   isn't "the smallest cap", it's "no cap at all". Three gradient layers on
+   the track's `background`, dot and left cap on top (layer order matters:
+   an opaque layer later in the list paints over an earlier one wherever
+   both are opaque, so the two circles have to be listed before the track
+   layer, or the track layer, though transparent under them by construction,
+   would be one more thing that could silently start hiding them after an
+   edit):
 
-     1. radial-gradient — a hard-edged ~4.5px circle centered on the THUMB's
-        position at value 0, i.e. `at <inset>px 50%` where inset is half the
-        thumb's width (Slider.css fixes it at 14px): inset = 14 / 2 = 7px.
-        Filled with the same shade the main track already uses
-        (var(--border-medium)) rather than a new tone, so it reads as part
-        of the same system and stays legible on the page background in both
-        themes without a separate contrast check. Transparent everywhere
-        outside the circle, so layer 2 shows through. When the thumb sits at
-        Default it fully covers the dot — expected.
-     2. linear-gradient — the continuous track: var(--bg-body) (the page
+     1. radial-gradient — the Default dot: a hard-edged ~4.5px circle
+        centered on the THUMB's position at value 0, i.e. `at <inset>px 50%`
+        where inset is half the thumb's width (Slider.css fixes it at 14px):
+        inset = 14 / 2 = 7px. Filled with the same shade the main track
+        already uses (var(--border-strong)) rather than a new tone, so it
+        reads as part of the same system and stays legible on the page
+        background in both themes without a separate contrast check.
+        Transparent everywhere outside the circle, so layers below show
+        through. When the thumb sits at Default it fully covers the dot —
+        expected.
+     2. radial-gradient — the track's LEFT end cap. The linear-gradient
+        below (layer 3) draws a flat-capped bar; the right end already reads
+        as rounded because it's clipped by the track element's own
+        border-radius (Slider.css: var(--radius-sm)), but the *left* end
+        sits at an internal color boundary the border-radius has no power
+        over, so it stays square unless something explicitly rounds it. A
+        circle of radius r = trackHeight / 2 does exactly that, the same
+        relationship a CSS `border-radius: 9999px` pill relies on: with
+        Slider.css's track fixed at 4px tall, r = 4 / 2 = 2px. Centered at
+        `boundary + r` so the circle's own left edge lines up with where the
+        bar used to start flat, giving it a rounded cap instead of moving
+        the bar rightward.
+     3. linear-gradient — the continuous track: var(--bg-body) (the page
         background this control actually sits on — .app-content has no
-        background of its own, see App.css) from the box start up to the
-        0/1 boundary, i.e. genuinely nothing drawn there except the dot
-        above; var(--border-medium) from the boundary to the end, unchanged
-        from before. The boundary is the THUMB's position at value 0.5, not
-        simply 0.5/8 = 6.25% of the track's own box: the track box is wider
-        than the thumb's actual travel, since a native range input insets
-        travel by half the thumb's width on each end (track fixed at 130px
-        in Slider.css). A gradient's stops can mix percentages and lengths
-        freely, so both the dot's center and the boundary are written
-        directly as lengths instead of first converting to percentages:
-       inset    = thumbWidth / 2                = 7px
-       travel   = trackWidth - thumbWidth       = 116px
-       boundary = inset + (0.5 / 8) * travel    = 14.25px
-   Both are the formula's answer, not a screenshot-verified one — nudge the
-   `7px` (dot center) or `14.25px` (track start) below if either drifts
-   visibly off the real thumb geometry.
+        background of its own, see App.css) from the box start up to
+        `boundary + r`, i.e. genuinely nothing drawn there except the two
+        circles above; var(--border-strong) from `boundary + r` to the end.
+        `boundary` is the THUMB's position at value 0.5, not simply
+        0.5/8 = 6.25% of the track's own box: the track box is wider than
+        the thumb's actual travel, since a native range input insets travel
+        by half the thumb's width on each end (track fixed at 130px in
+        Slider.css). A gradient's stops can mix percentages and lengths
+        freely, so every position below is written directly as a length
+        instead of first converting to a percentage:
+       inset          = thumbWidth / 2                 = 7px
+       travel         = trackWidth - thumbWidth        = 116px
+       boundary       = inset + (0.5 / 8) * travel      = 14.25px
+       r              = trackHeight / 2                = 2px
+       leftCapCenter  = boundary + r                    = 16.25px
+   All of the above are the formulas' answers, not screenshot-verified ones
+   — nudge `7px` (dot center), `2px` (cap radius, only if trackHeight in
+   Slider.css changes), or `14.25px`/`16.25px` (boundary and the resulting
+   cap center / track start, which move together) below if any drifts
+   visibly off the real thumb geometry. The dot's own radius (2.25px) is
+   deliberately not tied to r — it is an independent "~4-5px, reads as a
+   dot" choice from the previous round, not a rounded-cap computation, so
+   don't "fix" it to match r.
+   All three painted pieces (dot, left cap, main track) use
+   var(--border-strong), not var(--border-medium) as an earlier round had
+   it: border-medium is a low-alpha overlay (12% dark / 14% light) tuned for
+   things that sit ON a raised surface (--bg-secondary/--bg-elevated) —
+   against this control's actual backdrop, --bg-body, that read as faint,
+   especially in the light theme. border-strong roughly doubles the alpha in
+   both themes (22% dark / 25% light — see theme.css) and is still the
+   quietest step up available (the next one up, --text-secondary, is a solid
+   opaque color meant for text, not a rail/border-family fill), so it stays
+   in the same "border" semantic family this element already belongs to
+   while actually reading as present rather than a hint of one. Sanity-
+   checked against the thumb: the thumb is var(--color-primary), a saturated
+   accent orange, painted 14px tall over a 4px track, so almost all of its
+   area reads against the page background (--bg-body) it always did, not the
+   track color — a stronger, still-neutral gray track only sharpens the
+   thumb/track edge where they do overlap, it doesn't compete with the
+   accent hue in either theme.
    Scoped to .max-nodes-control's own track rather than Slider.css: this
    geometry (index 0/1, a 0..8 axis) is specific to the 9-step Max nodes
    slider, not something every future Slider should carry. Two separate
@@ -59,16 +97,22 @@
   background:
     radial-gradient(
       circle 2.25px at 7px 50%,
-      var(--border-medium) 0%,
-      var(--border-medium) 100%,
+      var(--border-strong) 0%,
+      var(--border-strong) 100%,
+      transparent 100%
+    ),
+    radial-gradient(
+      circle 2px at 16.25px 50%,
+      var(--border-strong) 0%,
+      var(--border-strong) 100%,
       transparent 100%
     ),
     linear-gradient(
       to right,
       var(--bg-body) 0,
-      var(--bg-body) 14.25px,
-      var(--border-medium) 14.25px,
-      var(--border-medium) 100%
+      var(--bg-body) 16.25px,
+      var(--border-strong) 16.25px,
+      var(--border-strong) 100%
     );
 }
 
@@ -76,15 +120,21 @@
   background:
     radial-gradient(
       circle 2.25px at 7px 50%,
-      var(--border-medium) 0%,
-      var(--border-medium) 100%,
+      var(--border-strong) 0%,
+      var(--border-strong) 100%,
+      transparent 100%
+    ),
+    radial-gradient(
+      circle 2px at 16.25px 50%,
+      var(--border-strong) 0%,
+      var(--border-strong) 100%,
       transparent 100%
     ),
     linear-gradient(
       to right,
       var(--bg-body) 0,
-      var(--bg-body) 14.25px,
-      var(--border-medium) 14.25px,
-      var(--border-medium) 100%
+      var(--bg-body) 16.25px,
+      var(--border-strong) 16.25px,
+      var(--border-strong) 100%
     );
 }
