@@ -10,24 +10,44 @@
   color: var(--text-secondary);
 }
 
-/* Sets the Default slot (index 0) apart from the ascending presets with a
-   few-px break in the track, like `--| ------------` — so a stray nudge
-   away from Default reads as "now capped, starting from the smallest
-   preset", not just a number that happened to change. The break sits at the
-   THUMB's position for value 0.5 (the boundary between step 0 and step 1),
-   which is not simply 0.5/8 = 6.25% of the track's own box: the track box
-   is wider than the thumb's actual travel, since a native range input insets
-   travel by half the thumb's width on each end (Slider.css fixes the track
-   at 130px and the thumb at 14px). A gradient's stops can mix percentages
-   and lengths freely, so the boundary is written directly as a length
-   instead of first converting to a percentage of the box:
-     inset  = thumbWidth / 2                = 7px
-     travel = trackWidth - thumbWidth       = 116px
-     center = inset + (0.5 / 8) * travel    = 14.25px
-   This is the formula's answer, not a screenshot-verified one — nudge the
-   two `14.25px` stops below (kept as one repeated literal on purpose, so a
-   correction only has to change one number in each rule) if it drifts
-   visibly off the boundary.
+/* Sets Default (index 0) apart from the ascending presets as a small DOT
+   sitting outside the continuous track, like `・————`, rather than the
+   earlier recessed-segment design (`--| ------------`): a single point
+   outside the range reads truer than a mini track of its own — Default
+   isn't "the smallest cap", it's "no cap at all". Two gradient layers on
+   the track's `background`, dot on top (layer order matters: an opaque
+   layer later in the list paints over an earlier one wherever both are
+   opaque, so the dot has to be listed first or the track layer, though
+   transparent under it by construction, would be one more thing that could
+   silently start hiding it after an edit):
+
+     1. radial-gradient — a hard-edged ~4.5px circle centered on the THUMB's
+        position at value 0, i.e. `at <inset>px 50%` where inset is half the
+        thumb's width (Slider.css fixes it at 14px): inset = 14 / 2 = 7px.
+        Filled with the same shade the main track already uses
+        (var(--border-medium)) rather than a new tone, so it reads as part
+        of the same system and stays legible on the page background in both
+        themes without a separate contrast check. Transparent everywhere
+        outside the circle, so layer 2 shows through. When the thumb sits at
+        Default it fully covers the dot — expected.
+     2. linear-gradient — the continuous track: var(--bg-body) (the page
+        background this control actually sits on — .app-content has no
+        background of its own, see App.css) from the box start up to the
+        0/1 boundary, i.e. genuinely nothing drawn there except the dot
+        above; var(--border-medium) from the boundary to the end, unchanged
+        from before. The boundary is the THUMB's position at value 0.5, not
+        simply 0.5/8 = 6.25% of the track's own box: the track box is wider
+        than the thumb's actual travel, since a native range input insets
+        travel by half the thumb's width on each end (track fixed at 130px
+        in Slider.css). A gradient's stops can mix percentages and lengths
+        freely, so both the dot's center and the boundary are written
+        directly as lengths instead of first converting to percentages:
+       inset    = thumbWidth / 2                = 7px
+       travel   = trackWidth - thumbWidth       = 116px
+       boundary = inset + (0.5 / 8) * travel    = 14.25px
+   Both are the formula's answer, not a screenshot-verified one — nudge the
+   `7px` (dot center) or `14.25px` (track start) below if either drifts
+   visibly off the real thumb geometry.
    Scoped to .max-nodes-control's own track rather than Slider.css: this
    geometry (index 0/1, a 0..8 axis) is specific to the 9-step Max nodes
    slider, not something every future Slider should carry. Two separate
@@ -36,25 +56,35 @@
    the moment one selector in it is unsupported, and each vendor only
    recognizes its own pseudo-element. */
 .max-nodes-control .slider-input::-webkit-slider-runnable-track {
-  background: linear-gradient(
-    to right,
-    var(--border-weak) 0,
-    var(--border-weak) calc(14.25px - 2px),
-    var(--bg-body) calc(14.25px - 2px),
-    var(--bg-body) calc(14.25px + 2px),
-    var(--border-medium) calc(14.25px + 2px),
-    var(--border-medium) 100%
-  );
+  background:
+    radial-gradient(
+      circle 2.25px at 7px 50%,
+      var(--border-medium) 0%,
+      var(--border-medium) 100%,
+      transparent 100%
+    ),
+    linear-gradient(
+      to right,
+      var(--bg-body) 0,
+      var(--bg-body) 14.25px,
+      var(--border-medium) 14.25px,
+      var(--border-medium) 100%
+    );
 }
 
 .max-nodes-control .slider-input::-moz-range-track {
-  background: linear-gradient(
-    to right,
-    var(--border-weak) 0,
-    var(--border-weak) calc(14.25px - 2px),
-    var(--bg-body) calc(14.25px - 2px),
-    var(--bg-body) calc(14.25px + 2px),
-    var(--border-medium) calc(14.25px + 2px),
-    var(--border-medium) 100%
-  );
+  background:
+    radial-gradient(
+      circle 2.25px at 7px 50%,
+      var(--border-medium) 0%,
+      var(--border-medium) 100%,
+      transparent 100%
+    ),
+    linear-gradient(
+      to right,
+      var(--bg-body) 0,
+      var(--bg-body) 14.25px,
+      var(--border-medium) 14.25px,
+      var(--border-medium) 100%
+    );
 }
