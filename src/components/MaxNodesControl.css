@@ -104,13 +104,15 @@
   pointer-events: none;
 }
 
-/* The Default dot: a ~4.5px circle (radius 2.25px) centered on the THUMB's
-   position at value 0, i.e. x = <inset>px where inset is half the thumb's
-   width (Slider.css fixes it at 14px): inset = 14 / 2 = 7px. */
+/* The Default dot, centered on the THUMB's position at value 0, i.e.
+   x = <inset>px where inset is half the thumb's width (Slider.css fixes it
+   at 14px): inset = 14 / 2 = 7px. 6px diameter, deliberately larger than
+   the bar's 4px height: a circle carries less visual mass than a bar of
+   equal height and read as thinner at matched sizes. */
 .max-nodes-rail-dot {
   left: 7px;
-  width: 4.5px;
-  height: 4.5px;
+  width: 6px;
+  height: 6px;
   transform: translate(-50%, -50%);
   border-radius: 50%;
 }
