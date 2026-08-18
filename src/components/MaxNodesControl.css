@@ -3,6 +3,24 @@
   align-items: center;
   gap: var(--space-1);
   height: 35px;
+  /* Opaque, theme-aware "rail" tone for the dot + left cap + bar below (see
+     the divider comment on the track rules) — local to this control, not a
+     general design token, because the reason it has to be OPAQUE is
+     specific to how those three gradient layers overlap here. A translucent
+     token (var(--border-strong), tried first) doubles up wherever two
+     layers overlap the same pixels; mixing a slice of var(--text-primary)
+     into var(--bg-body) up front instead produces a single solid color that
+     renders identically whether it's painted once or stacked ten times, and
+     both inputs are theme tokens, so light/dark derive automatically. 28%
+     was picked to land close to var(--border-strong)'s own effective weight
+     (computed by hand against both themes' actual hex values in theme.css:
+     border-strong's alpha-over-bg-body works out to roughly a 25-26% mix in
+     dark and 22-25% in light) — a touch stronger rather than weaker, in
+     keeping with the direction every round of feedback on this control has
+     gone (too-faint tokens got replaced with stronger ones, never the
+     reverse). Nudge the percentage if a screenshot shows it drifting from
+     that target weight. */
+  --mn-rail: color-mix(in srgb, var(--text-primary) 28%, var(--bg-body));
 }
 
 .max-nodes-control-label {
@@ -13,123 +31,137 @@
 /* Sets Default (index 0) apart from the ascending presets as a small DOT
    sitting outside the continuous track, like `・ ●————`: a single point
    outside the range reads truer than a mini track of its own — Default
-   isn't "the smallest cap", it's "no cap at all".
+   isn't "the smallest cap", it's "no cap at all". Three gradient layers on
+   the track's `background`, dot and left cap on top (layer order matters:
+   an opaque layer later in the list paints over an earlier one wherever
+   both are opaque, so the two circles have to be listed before the track
+   layer, or the track layer, though transparent under them by construction,
+   would be one more thing that could silently start hiding them after an
+   edit).
 
-   Two earlier CSS approaches for the divider/cap are gone from this file on
-   purpose — both left a visible artifact once looked at closely enough, and
-   both root causes are worth keeping in mind before reaching for a gradient
-   here again:
+   Two earlier approaches for the divider/cap are gone from this file on
+   purpose — each broke a different way once looked at closely enough or in
+   the right browser, and all three root causes are worth keeping in mind
+   before changing this again:
      - A recessed left segment (lighter shade + a small gap) read as its own
        track-within-a-track, not a point outside the range.
-     - Stacked translucent gradient LAYERS on the track pseudo-element (one
-       radial for the dot, one radial for a rounded left cap, one linear for
-       the bar itself) painted the cap's circle ON TOP OF the bar wherever
-       they overlapped (x 16.25px -> 18.25px, half the cap circle) — two
-       ~25%-alpha var(--border-strong) paints stacked there compound to
-       ~44%, a visibly darker semicircle at the bar's left end in the light
-       theme. Geometry makes some overlap between a symmetric round cap and
-       the bar it rounds unavoidable, so the fix is to stop layering
-       translucent paint at all, not to keep chasing the overlap region.
+     - This same three-gradient-layer geometry, but painted with the
+       translucent var(--border-strong): the cap's circle painted ON TOP OF
+       the bar wherever they overlapped (x 16.25px -> 18.25px, half the cap
+       circle), and two ~25%-alpha paints stacked there compound to ~44% —
+       a visibly darker semicircle at the bar's left end in the light theme.
+       Geometry makes some overlap between a symmetric round cap and the bar
+       it rounds unavoidable, so the fix below is to stop the paint itself
+       from being able to double up, not to keep chasing the overlap region.
+     - `clip-path: inset(...)` on the track pseudo-element instead of a cap
+       gradient, to dodge the overlap entirely by cutting the box short
+       rather than drawing over it. This LOOKED right in isolation but broke
+       WebKit specifically: `::-webkit-slider-thumb` renders as a CHILD of
+       `::-webkit-slider-runnable-track` in that engine's shadow tree, so
+       clipping the track also clipped the thumb — the round accent circle
+       came out as a clipped-off rectangle. Nothing about Gecko's box model
+       makes that true there, which is exactly why it looked fine in one
+       browser and broke in the other; a fix that depends on which parts of
+       an element's own rendering are or aren't inside another element's
+       clip region is too fragile to keep, so this file no longer clips
+       anything.
 
-   Current approach — one solid paint, no stacking, geometry instead of a
-   second gradient for the rounding:
-     1. The track pseudo-element (::-webkit-slider-runnable-track /
-        ::-moz-range-track) is a single, non-layered `background:
-        var(--border-strong)` — translucent over the page background is
-        fine on its own; it was only ever the STACKING of two translucent
-        layers that doubled the alpha.
-     2. `clip-path: inset(0 0 0 <boundary> round <r>)` clips the track's
-        rendered box to start at `boundary` (the 0/1 index boundary,
-        computed below) instead of the box's actual left edge, with all
-        four corners rounded by `r`. The right end already read as rounded
-        before this change too, via `border-radius: var(--radius-sm)` on the
-        same element (Slider.css) — `--radius-sm` is 4px, larger than a
-        4px-tall box can show, so a corner radius that large was already
-        capped down to r = trackHeight / 2 = 2px in practice; the
-        clip-path's own `round 2px` just makes that explicit instead of
-        incidental, and now covers the left end too. Because the clip
-        removes the box's content there entirely rather than painting over
-        it with another color, there is nothing left underneath to stack
-        with — the region left of `boundary` is genuinely empty on this
-        element, not a color choice.
-     3. The Default dot moves OFF the track pseudo-element (a clip-path
-        would cut it away along with everything else left of `boundary`)
-        onto `.slider-input`'s OWN `background` — the host `<input>`, not
-        either vendor track pseudo-element. Its box is 4px tall (Slider.css:
-        `.slider-input { width: 130px; height: 4px; ... }`) — the same
-        number the track pseudo-element happens to use too, but that is
-        THIS element's own declared height, checked here specifically
-        rather than assumed from the track pseudo-element it is no longer
-        painted on. A plain radial-gradient, nothing else in `background`:
-        solid to 1.75px, transparent by 2.25px (soft edge — same reasoning
-        as the earlier fix: a hard stop at the true radius still
-        antialiases a faint halo past it). Outside the dot's circle the
-        layer is transparent, and every ancestor up to <body>
-        (.max-nodes-control, .controls-bar, .app-content — see App.css) has
-        no background of its own, so the true page background (body's
-        var(--bg-body)) shows through there without this file needing to
-        name it explicitly. Where the track pseudo-element still paints
-        (right of `boundary`), it sits on top of this host background and
-        fully occludes it, so the dot is only ever visible in the
-        clipped-away region — exactly where Default's dot belongs. When the
-        thumb sits at Default it covers the dot too — expected.
-   All positions below are the formulas' answers, not screenshot-verified
-   ones:
-     inset    = thumbWidth / 2                = 7px
-     travel   = trackWidth - thumbWidth       = 116px
-     boundary = inset + (0.5 / 8) * travel    = 14.25px
-     r        = trackHeight / 2               = 2px
-   Nudge `7px` (dot center), `14.25px` (clip boundary), or `2px` (corner
-   radius, only if trackHeight in Slider.css changes) if any drifts visibly
-   off the real thumb geometry. The dot's own radius (2.25px) is
-   deliberately not tied to r — it is an independent "~4-5px, reads as a
-   dot" choice, not a rounded-cap computation.
-
-   var(--border-strong), not var(--border-medium): border-medium is a
-   low-alpha overlay (12% dark / 14% light, theme.css) tuned for things that
-   sit ON a raised surface (--bg-secondary/--bg-elevated) — against this
-   control's actual backdrop, --bg-body, that read as too faint, especially
-   in the light theme. border-strong roughly doubles the alpha in both
-   themes (22% dark / 25% light) and is still the quietest step up available
-   (the next one, --text-secondary, is a solid opaque color meant for text,
-   not a rail/border-family fill) — and now that it is painted only once per
-   element (never stacked, per the fix above), its alpha reads as designed
-   instead of compounding. Sanity-checked against the thumb: the thumb is
-   var(--color-primary), a saturated accent orange, painted 14px tall over a
-   4px track, so almost all of its area reads against the page background it
-   always did, not the track color.
-
-   ::-moz-range-track is a real generated box in Gecko (unlike some of
-   WebKit's more UA-internal slider parts), so clip-path is expected to
-   apply to it the same as any other element — but this could not be
-   verified against a live Firefox in this environment (the project's own
-   e2e suite is Chromium-only, see playwright.config.ts). If a real check
-   ever shows otherwise, the fallback is: keep clip-path on the webkit rule,
-   and give -moz-range-track back a two-stop linear-gradient
-   (var(--bg-body) up to `boundary`, var(--border-strong) from `boundary` to
-   100%) with NO cap radial — an intentionally square left end for Firefox
-   only, rather than reintroducing the stacked-translucent-layers bug there.
-   Scoped to .max-nodes-control's own elements rather than Slider.css: this
+   Current approach, restoring this geometry with an opaque color instead of
+   a translucent one (var(--mn-rail), defined above):
+     1. radial-gradient — the Default dot: a ~4.5px circle (radius 2.25px)
+        centered on the THUMB's position at value 0, i.e. `at <inset>px 50%`
+        where inset is half the thumb's width (Slider.css fixes it at 14px):
+        inset = 14 / 2 = 7px. Solid to 1.75px, fading to fully transparent by
+        its true 2.25px radius rather than a hard stop at 2.25px — a
+        same-position hard stop still antialiases the rendered edge across
+        roughly a device pixel, and for an opaque-to-transparent stop that
+        shows up as a faint halo bleeding past the nominal radius. Filled
+        with var(--mn-rail) so it reads as part of the same system as the
+        bar rather than a new tone. Transparent everywhere outside the
+        circle, so layers below show through. When the thumb sits at
+        Default it fully covers the dot — expected.
+     2. radial-gradient — the track's LEFT end cap, so the left end reads as
+        rounded the same way the right end already does (clipped by the
+        track element's own `border-radius: var(--radius-sm)`, Slider.css).
+        A circle of radius r = trackHeight / 2 does that — the same
+        relationship a CSS `border-radius: 9999px` pill relies on — with
+        Slider.css's track fixed at 4px tall, r = 4 / 2 = 2px. Centered at
+        `boundary + r` so the circle's own left edge lines up with where the
+        bar would otherwise start flat. Same inside-completing fade as the
+        dot and for the same reason (solid to 1.5px, transparent by exactly
+        2px = r, not a hard stop at r) — at 4x zoom a hard stop here read as
+        the cap bulging wider than the 4px bar, a second dot rather than a
+        flush rounded end.
+     3. linear-gradient — the continuous track: var(--bg-body) (the page
+        background this control actually sits on — .app-content has no
+        background of its own, see App.css) from the box start up to
+        `boundary + r`, i.e. genuinely nothing drawn there except the two
+        circles above; var(--mn-rail) from `boundary + r` to the end,
+        unchanged in shape from every earlier round — only the color
+        painting it changed. `boundary` is the THUMB's position at value
+        0.5, not simply 0.5/8 = 6.25% of the track's own box: the track box
+        is wider than the thumb's actual travel, since a native range input
+        insets travel by half the thumb's width on each end (track fixed at
+        130px in Slider.css). A gradient's stops can mix percentages and
+        lengths freely, so every position below is written directly as a
+        length instead of first converting to a percentage:
+       inset          = thumbWidth / 2                 = 7px
+       travel         = trackWidth - thumbWidth        = 116px
+       boundary       = inset + (0.5 / 8) * travel      = 14.25px
+       r              = trackHeight / 2                = 2px
+       leftCapCenter  = boundary + r                    = 16.25px
+   All of the above are the formulas' answers, not screenshot-verified ones
+   — nudge `7px` (dot center), `2px` (cap radius, only if trackHeight in
+   Slider.css changes), or `14.25px`/`16.25px` (boundary and the resulting
+   cap center / track start, which move together) if any drifts visibly off
+   the real thumb geometry. The dot's own radius (2.25px) is deliberately
+   not tied to r — it is an independent "~4-5px, reads as a dot" choice, not
+   a rounded-cap computation.
+   Scoped to .max-nodes-control's own track rather than Slider.css: this
    geometry (index 0/1, a 0..8 axis) is specific to the 9-step Max nodes
-   slider, not something every future Slider should carry. The track rules
-   stay two separate ones, not one comma-joined with ::-moz-range-track, for
-   the same reason Slider.css's focus rule is split — a selector list is
-   invalid as a whole the moment one selector in it is unsupported, and each
-   vendor only recognizes its own pseudo-element. */
-.max-nodes-control .slider-input {
-  background: radial-gradient(
-    circle at 7px 50%,
-    var(--border-strong) 1.75px,
-    transparent 2.25px
-  );
-}
-
+   slider, not something every future Slider should carry. Two separate
+   rules, not one comma-joined with ::-moz-range-track, for the same reason
+   Slider.css's focus rule is split — a selector list is invalid as a whole
+   the moment one selector in it is unsupported, and each vendor only
+   recognizes its own pseudo-element. */
 .max-nodes-control .slider-input::-webkit-slider-runnable-track {
-  background: var(--border-strong);
-  clip-path: inset(0 0 0 14.25px round 2px);
+  background:
+    radial-gradient(
+      circle at 7px 50%,
+      var(--mn-rail) 1.75px,
+      transparent 2.25px
+    ),
+    radial-gradient(
+      circle at 16.25px 50%,
+      var(--mn-rail) 1.5px,
+      transparent 2px
+    ),
+    linear-gradient(
+      to right,
+      var(--bg-body) 0,
+      var(--bg-body) 16.25px,
+      var(--mn-rail) 16.25px,
+      var(--mn-rail) 100%
+    );
 }
 
 .max-nodes-control .slider-input::-moz-range-track {
-  background: var(--border-strong);
-  clip-path: inset(0 0 0 14.25px round 2px);
+  background:
+    radial-gradient(
+      circle at 7px 50%,
+      var(--mn-rail) 1.75px,
+      transparent 2.25px
+    ),
+    radial-gradient(
+      circle at 16.25px 50%,
+      var(--mn-rail) 1.5px,
+      transparent 2px
+    ),
+    linear-gradient(
+      to right,
+      var(--bg-body) 0,
+      var(--bg-body) 16.25px,
+      var(--mn-rail) 16.25px,
+      var(--mn-rail) 100%
+    );
 }
