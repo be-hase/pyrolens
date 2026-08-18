@@ -169,6 +169,11 @@ Views: `/` (Single), `/comparison`, `/diff`, `/explore` (Tag Explorer).
 Switching tenant from the nav bar starts fresh at `/?tenant=<new>`; the
 browser's Back button restores the previous tenant's screen intact.
 
+Once any of the above has drifted from its default, a Reset view button
+appears in the controls bar to clear it all back — keeping only the tenant,
+the current view and the service/profile type — with Back available to
+restore the state it cleared.
+
 The refresh picker next to the time range control repeats the current view
 on the chosen interval — only while the range ends at "now", and paused
 whenever the tab is in the background.

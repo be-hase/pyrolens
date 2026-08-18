@@ -89,10 +89,39 @@ export function navigate(opts: NavigateOptions): void {
   // (`buildUrl({})`) makes both sides go through the identical
   // normalisation, so only an actual param change trips it.
   const unchanged = url === buildUrl({});
-  if (opts.replace || unchanged) window.history.replaceState(null, '', url);
-  else window.history.pushState(null, '', url);
+  if (opts.replace || unchanged) {
+    window.history.replaceState(null, '', url);
+  } else {
+    window.history.pushState(null, '', url);
+    pushGeneration += 1;
+  }
   window.dispatchEvent(new Event(NAV_EVENT));
 }
+
+// Bumped on every push-shaped navigation — a real `pushState` above (not a
+// replace, and not the "nothing changed" case that quietly downgrades to
+// one) — and on a browser `popstate` (Back/Forward). Both are the moments
+// the user's context deliberately moves to a different point in history; a
+// replace is not one of those, on purpose — a background writer settling
+// (the flame graph search debounce, a stale-groupBy correction) must not
+// look like a context switch, or unrelated background writers could cancel
+// each other's legitimate work.
+//
+// A consumer with its own debounced commit (MaxNodesControl,
+// useFlameGraphUrlState) captures this number at the moment the user's
+// intent diverges from what's committed (a slider drag, a keystroke), and
+// compares it again when the debounce would finally write: if it moved, the
+// edit was decided in a context that no longer exists — a Reset, a Back, a
+// deep link landing mid-debounce — and must not land in the new one. Same
+// family of staleness rule as the `t v` clipboard guard (AGENTS.md): a
+// settled read is only good for the context it was captured in.
+let pushGeneration = 0;
+export function pushGenerationNow(): number {
+  return pushGeneration;
+}
+window.addEventListener('popstate', () => {
+  pushGeneration += 1;
+});
 
 /**
  * Params whose value only changes how already-fetched data is rendered —
