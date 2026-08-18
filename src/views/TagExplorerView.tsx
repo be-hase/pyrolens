@@ -330,6 +330,21 @@ export function TagExplorerView({
         from={from}
         until={until}
         range={range}
+        // Reset view must not clear groupBy only to have the default-groupBy
+        // effect above immediately rewrite it back in — that would push a
+        // destructive no-op and the button would never hide. Passing the
+        // resolved default (once labels have actually settled non-empty)
+        // makes the reset target groupBy=<default> directly instead, which
+        // this view's own effect then sees as already-confirmed and leaves
+        // alone. Before labels settle, the default isn't knowable yet, so
+        // `undefined` tells ResetViewButton to leave groupBy alone entirely
+        // rather than guess.
+        resetDefaults={{
+          groupBy:
+            labels.settled && labels.data.length > 0
+              ? labels.data[0]
+              : undefined,
+        }}
       />
 
       {labels.data.length > 0 && (

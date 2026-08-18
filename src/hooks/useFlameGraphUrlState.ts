@@ -1,5 +1,10 @@
-import { useEffect } from 'react';
-import { navigate, useRoute, type NavigateOptions } from '../urlState';
+import { useEffect, useRef } from 'react';
+import {
+  navigate,
+  pushGenerationNow,
+  useRoute,
+  type NavigateOptions,
+} from '../urlState';
 import { useDebouncedValue } from './useDebouncedValue';
 import { useEditBuffer } from './useEditBuffer';
 
@@ -98,14 +103,43 @@ export function useFlameGraphUrlState(): {
   // again, including when it changes back to what's already committed.
   const debouncedSearch = useDebouncedValue(searchDraft, SEARCH_DEBOUNCE_MS);
 
+  // The push generation (urlState.ts's pushGenerationNow — see its doc for
+  // the doctrine) as of the most recent edit. Captured on every keystroke
+  // rather than read fresh in the effect, so the effect can tell "this
+  // debounce is about the context the user was typing in" from "a push (a
+  // Reset, Back, a deep link) landed after the last keystroke and before the
+  // debounce settled" — the latter must not write stale text into the new
+  // context. Mirrors MaxNodesControl's `pushGen`.
+  const editPushGen = useRef(pushGenerationNow());
+  const onSearchChange = (next: string) => {
+    editPushGen.current = pushGenerationNow();
+    setSearchDraft(next);
+  };
+
   useEffect(() => {
+    if (editPushGen.current !== pushGenerationNow()) {
+      // Stale: the context moved since this edit was typed. useEditBuffer's
+      // own reset only fires when the *committed* fgSearch value itself
+      // changes, which does not happen when the param was already absent
+      // both before and after the push (the same gap MaxNodesControl has
+      // when maxNodes was never present) — so the draft is pulled back to
+      // committed by hand. A skipped write alone is not enough: with
+      // nothing else changing `searchDraft`/`fgSearch`, this effect would
+      // never run again and the box would go on silently showing text it
+      // can never apply.
+      if (searchDraft !== fgSearch) setSearchDraft(fgSearch);
+      return;
+    }
     const opts = searchNavigateOptions(debouncedSearch, searchDraft, fgSearch);
     if (opts) navigate(opts);
-  }, [debouncedSearch, searchDraft, fgSearch]);
+    // setSearchDraft is useState's setter (via useEditBuffer), stable across
+    // renders — listed for the lint rule's sake, not because its identity
+    // can change.
+  }, [debouncedSearch, searchDraft, fgSearch, setSearchDraft]);
 
   return {
     search: searchDraft,
-    onSearchChange: setSearchDraft,
+    onSearchChange,
     sandwichItem: fgSandwich,
     onSandwichChange: (item) => navigate(sandwichNavigateOptions(item)),
   };

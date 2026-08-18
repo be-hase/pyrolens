@@ -6,6 +6,7 @@ import {
   buildUrl,
   navigate,
   onLinkClick,
+  pushGenerationNow,
   useRoute,
 } from './urlState.ts';
 
@@ -128,6 +129,41 @@ describe('navigate', () => {
     navigate({ set: { tenant: 'team-a' } });
     window.removeEventListener('pyroscope:navigate', listener);
     assert.deepEqual(seen, ['?tenant=team-a']);
+  });
+});
+
+describe('pushGenerationNow', () => {
+  it('bumps on a real push navigation', () => {
+    const before = pushGenerationNow();
+    navigate({ path: '/diff', set: { query: '{a="b"}' } });
+    assert.equal(pushGenerationNow(), before + 1);
+  });
+
+  it('does not bump on a replace navigation', () => {
+    navigate({ set: { tenant: 'team-a' } });
+    const before = pushGenerationNow();
+    navigate({ set: { tenant: 'team-b' }, replace: true });
+    assert.equal(pushGenerationNow(), before);
+  });
+
+  it('does not bump on a navigation that changes nothing (downgraded to a replace)', () => {
+    navigate({ path: '/diff', set: { query: '{a="b"}' } });
+    const before = pushGenerationNow();
+    navigate({ set: { query: '{a="b"}' } });
+    assert.equal(pushGenerationNow(), before);
+  });
+
+  it('bumps on a browser Back (popstate)', async () => {
+    navigate({ path: '/comparison' });
+    const before = pushGenerationNow();
+    await act(async () => {
+      const popped = new Promise((resolve) =>
+        window.addEventListener('popstate', resolve, { once: true }),
+      );
+      window.history.back();
+      await popped;
+    });
+    assert.equal(pushGenerationNow(), before + 1);
   });
 });
 

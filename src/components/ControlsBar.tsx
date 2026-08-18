@@ -2,6 +2,10 @@ import { useMemo } from 'react';
 import { CascadeSelect } from '@components/core/CascadeSelect';
 import { MaxNodesControl } from '@components/MaxNodesControl';
 import { RefreshPicker } from '@components/RefreshPicker';
+import {
+  ResetViewButton,
+  type ResetDefaults,
+} from '@components/ResetViewButton';
 import { TimeRangePicker } from '@components/TimeRangePicker';
 import { type Service, profileTypeLabel, sortProfileTypes } from '@api/client';
 import { buildQuery, parseQuery } from '../queryLang';
@@ -25,6 +29,7 @@ export function ControlsBar({
   until,
   range,
   showMaxNodes,
+  resetDefaults,
 }: {
   services: Service[];
   servicesLoading: boolean;
@@ -35,6 +40,10 @@ export function ControlsBar({
   /** Renders the Max nodes slider — only the views with a flame graph
    * (Single, Comparison, Diff) opt in; Tag Explorer has none. */
   showMaxNodes?: boolean;
+  /** Passed straight through to ResetViewButton — see its `defaults` prop
+   * (ResetViewButton.tsx) for a view with a materialized default of its own
+   * (TagExplorerView's groupBy). Omitted by every other view. */
+  resetDefaults?: ResetDefaults;
 }) {
   const parsed = parseQuery(query);
 
@@ -69,6 +78,7 @@ export function ControlsBar({
       <TimeRangePicker from={from} until={until} range={range} />
       <RefreshPicker from={from} until={until} />
       {showMaxNodes && <MaxNodesControl />}
+      <ResetViewButton defaults={resetDefaults} />
     </div>
   );
 }

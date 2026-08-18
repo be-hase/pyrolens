@@ -411,3 +411,81 @@ test('the query bar suggests labels from the server', async ({ page }) => {
   await listbox.getByRole('option', { name: 'region' }).click();
   await expect(input).toHaveValue('{region=""');
 });
+
+test('Reset view clears every accumulated param, keeps tenant/service/profile_type, and refetches under the reset state', async ({
+  page,
+}) => {
+  // A URL messy with an extra query matcher plus one param from most of the
+  // RESETS categories: the range, refresh, both Tag Explorer params (harmless
+  // here but exercises the generic "clear every current key" mechanism
+  // rather than a hardcoded list), the flame graph search/sandwich,
+  // maxNodes, and both comparison panes' window overrides. leftQuery/
+  // rightQuery are left alone (inheriting the main query, the default) —
+  // overriding them to `{}` would leave both panes on "No query selected"
+  // and there would be nothing to assert a fetch against.
+  await page.goto(
+    url('/comparison', {
+      query: `{service_name="${meta.service}", profile_type="${meta.profileType}", region="eu-west"}`,
+      refresh: '30s',
+      groupBy: 'region',
+      sort: 'max',
+      fgSearch: 'queryDatabase',
+      fgSandwich: 'main.queryDatabase',
+      maxNodes: 500,
+      leftFrom: meta.left.start,
+      leftUntil: meta.left.end,
+      rightFrom: meta.right.start,
+      rightUntil: meta.right.end,
+    }),
+  );
+  await expect(page.locator('.plfg-metadata-pill').first()).toBeVisible();
+
+  // Let every request the initial load caused actually land before clearing
+  // the log — refresh=30s is live until the click, and on a slow CI runner a
+  // straggler under the OLD (region-matcher) selector could otherwise be
+  // logged after the clear but before the click, landing in the same window
+  // the poll below reads and failing its `every()` check for good rather
+  // than just flaking. Same "poll until stable" idiom as the Max nodes
+  // coalescing test above.
+  let settled = -1;
+  await expect
+    .poll(async () => {
+      const len = (
+        await upstreamLog(page).then((log) =>
+          log.filter((e) => e.method === 'SelectMergeStacktraces'),
+        )
+      ).length;
+      if (len === settled) return 'stable';
+      settled = len;
+      return len;
+    })
+    .toBe('stable');
+
+  await clearUpstreamLog(page);
+  await page.getByRole('button', { name: 'Reset view' }).click();
+
+  // Pathname is untouched — this is a param reset, not a view change.
+  await expect(page).toHaveURL(/^[^?]*\/comparison\?/);
+  const params = new URL(page.url()).searchParams;
+  expect([...params.keys()].sort()).toEqual(['query', 'tenant']);
+  expect(params.get('tenant')).toBe(meta.tenant);
+  expect(params.get('query')).toBe(
+    `{service_name="${meta.service}", profile_type="${meta.profileType}"}`,
+  );
+
+  // Not just that the URL changed: the region matcher actually dropped out
+  // of what was sent upstream, proving the reset state was really refetched
+  // rather than the old response staying on screen.
+  const expectedSelector = `{service_name="${meta.service}"}`;
+  await expect
+    .poll(async () => {
+      const calls = (await upstreamLog(page)).filter(
+        (entry) => entry.method === 'SelectMergeStacktraces',
+      );
+      return (
+        calls.length > 0 &&
+        calls.every((entry) => entry.labelSelector === expectedSelector)
+      );
+    })
+    .toBe(true);
+});

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import { fetchGroupedTimelines, fetchLabelNames } from '@api/client';
@@ -397,5 +397,79 @@ describe('TagExplorerView ControlsBar', () => {
   it('does not render the Max nodes slider — there is no flame graph here', () => {
     render(<TagExplorerView {...PROPS} />);
     assert.ok(!screen.queryByRole('slider', { name: 'Max nodes' }));
+  });
+});
+
+describe('TagExplorerView Reset view', () => {
+  // Every render here has groupedTimelinesOf resolved so the default-groupBy
+  // effect's dependencies (labels.data, labels.fetching) settle deterministically.
+  const resetButton = () =>
+    screen.queryByRole('button', { name: 'Reset view' });
+
+  // groupByLabels (tagExplorerData.ts) alphabetizes the fetched list, so
+  // ['zone', 'pod'] resolves to a default of 'pod' (labels[0] post-sort) —
+  // spelled out rather than assumed, since getting this backwards would
+  // silently make both tests below assert the wrong label.
+  const LABELS = ['zone', 'pod'];
+  const DEFAULT_LABEL = 'pod';
+  const OTHER_LABEL = 'zone';
+
+  it('(a) stays hidden on a pristine /explore once the default-groupBy effect materializes groupBy — a materialized default must not itself count as an override', async () => {
+    // Nothing in the URL to start: this view's default-groupBy effect writes
+    // `groupBy=<default>` on its own, the same way a pristine Single view
+    // always carries a materialized `query`. If the reset button judged
+    // that write as "non-default" the same way it does any other groupBy
+    // value, it would show up on every fresh /explore load and a click
+    // would push a destructive no-op.
+    at('/');
+    labelNamesOf.mockResolvedValue(LABELS);
+
+    render(<TagExplorerView {...PROPS} />);
+
+    await waitFor(() =>
+      assert.equal(
+        new URLSearchParams(window.location.search).get('groupBy'),
+        DEFAULT_LABEL,
+      ),
+    );
+    assert.ok(!resetButton(), 'expected no Reset view button once at defaults');
+  });
+
+  it('(b) shows once the user picks a groupBy other than the default, and clicking sets it straight to the default with no rewrite loop', async () => {
+    // OTHER_LABEL is a legitimately confirmed label (present in the fetched
+    // list), so the stale-groupBy-reset effect leaves it alone — but it is
+    // not the default, so it is a real, resettable override.
+    at(`/?groupBy=${OTHER_LABEL}`);
+    labelNamesOf.mockResolvedValue(LABELS);
+
+    render(<TagExplorerView {...PROPS} />);
+    await waitFor(() => assert.equal(groupedTimelinesOf.mock.calls.length, 1));
+    assert.equal(
+      new URLSearchParams(window.location.search).get('groupBy'),
+      OTHER_LABEL,
+    );
+
+    const button = resetButton();
+    assert.ok(button, 'expected a Reset view button for a non-default groupBy');
+
+    const pushSpy = vi.spyOn(window.history, 'pushState');
+    fireEvent.click(button!);
+
+    assert.equal(
+      new URLSearchParams(window.location.search).get('groupBy'),
+      DEFAULT_LABEL,
+    );
+    assert.equal(pushSpy.mock.calls.length, 1);
+
+    // The default-groupBy effect above sees groupBy already confirmed
+    // (labels.data.includes(DEFAULT_LABEL)) and must stay quiet — not
+    // rewrite it right back, which would be a second push and an
+    // endless-looking cycle on every subsequent render.
+    await waitFor(() => assert.ok(!resetButton()));
+    assert.equal(
+      pushSpy.mock.calls.length,
+      1,
+      'the default-groupBy effect must not push again for its own default',
+    );
   });
 });

@@ -3,7 +3,7 @@ import { Slider } from '@components/core/Slider';
 import { parseMaxNodes } from '@api/client';
 import { useDebouncedValue } from '@hooks/useDebouncedValue';
 import { useEditBuffer } from '@hooks/useEditBuffer';
-import { navigate, useRoute } from '../urlState';
+import { navigate, pushGenerationNow, useRoute } from '../urlState';
 import './MaxNodesControl.css';
 
 const TOOLTIP =
@@ -84,6 +84,13 @@ export function MaxNodesControl() {
     index: number;
     baseline: number;
     gen: number;
+    // urlState.ts's push generation as of the commit — see its doc for the
+    // doctrine. `baseline` alone misses the case that motivated this: a
+    // Reset-shaped push that clears every OTHER param but leaves maxNodes
+    // absent both before and after (it was never present to begin with)
+    // resolves to the same DEFAULT_INDEX baseline on both sides, so the
+    // baseline check alone can't tell the context moved.
+    pushGen: number;
   } | null>(null);
   const debouncedPending = useDebouncedValue(pending, COMMIT_DEBOUNCE_MS);
   const commitGeneration = useRef(0);
@@ -113,6 +120,11 @@ export function MaxNodesControl() {
     // from a legitimate "different from committed" one — two live reads of
     // committedIndex could never do that.
     if (pending.baseline !== committedIndex) return;
+    // A push (Reset view, Back, a deep link landing mid-debounce) happened
+    // since this commit was made — the user's context moved, and this
+    // commit was decided in the one that no longer exists. See the pushGen
+    // field's comment above and urlState.ts's pushGenerationNow doc.
+    if (pending.pushGen !== pushGenerationNow()) return;
     if (pending.index === committedIndex) return;
     navigate({
       set: {
@@ -155,6 +167,7 @@ export function MaxNodesControl() {
               index,
               baseline: committedIndex,
               gen: commitGeneration.current,
+              pushGen: pushGenerationNow(),
             });
           }}
         />

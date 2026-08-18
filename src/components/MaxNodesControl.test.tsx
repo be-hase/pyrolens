@@ -222,4 +222,61 @@ describe('MaxNodesControl', () => {
 
     nav.cleanup();
   });
+
+  it('(c) drops a pending commit made while maxNodes was absent, when a push lands mid-debounce and maxNodes is still absent afterwards', () => {
+    // The previous test's guard (pendingBaseline vs committedIndex) is blind
+    // to this shape: maxNodes was never present, so
+    // indexForMaxNodes(undefined) is DEFAULT_INDEX (0) both before and after
+    // the push below — baseline and committedIndex still agree, even though
+    // the user's context genuinely moved (e.g. Reset view, clearing every
+    // OTHER param). Only the push-generation guard catches it.
+    render(<MaxNodesControl />);
+    const nav = countNavigations();
+    const el = slider();
+
+    // Commit to index 3 (2048) from Default.
+    fireEvent.input(el, { target: { value: '3' } });
+    fireEvent.change(el, { target: { value: '3' } });
+    assert.equal(nav.count, 0);
+
+    // A push that never touches maxNodes at all — a real navigation
+    // (pathname changes), so it bumps urlState's push generation.
+    act(() => navigate({ path: '/comparison' }));
+    assert.equal(nav.count, 1);
+    assert.equal(params().has('maxNodes'), false);
+
+    // The stale commit's debounce elapses now. It must not fire.
+    act(() => vi.advanceTimersByTime(COMMIT_DEBOUNCE_MS));
+    assert.equal(
+      nav.count,
+      1,
+      'the stale commit must not cause a second navigation',
+    );
+    assert.equal(params().has('maxNodes'), false);
+
+    nav.cleanup();
+  });
+
+  it('(e) a background replace navigation mid-debounce does not cancel a pending commit', () => {
+    // Regression guard for the push-generation check above: a replace (e.g.
+    // the flame graph search's debounced write) is a background write
+    // settling, not a context switch, and must not be mistaken for one —
+    // urlState.ts's pushGenerationNow only moves on a push or a popstate.
+    render(<MaxNodesControl />);
+    const nav = countNavigations();
+    const el = slider();
+
+    fireEvent.input(el, { target: { value: '3' } });
+    fireEvent.change(el, { target: { value: '3' } });
+    assert.equal(nav.count, 0);
+
+    act(() => navigate({ set: { fgSearch: 'alloc' }, replace: true }));
+    assert.equal(nav.count, 1);
+
+    act(() => vi.advanceTimersByTime(COMMIT_DEBOUNCE_MS));
+    assert.equal(nav.count, 2, 'the slider commit must still land');
+    assert.equal(params().get('maxNodes'), '2048');
+
+    nav.cleanup();
+  });
 });

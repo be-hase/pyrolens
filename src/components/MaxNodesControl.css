@@ -57,16 +57,19 @@
    how small it is, the same way any other rounded UI element in this app
    does.
 
-   Structure: `.max-nodes-rail` is `position: relative`, sized to match the
-   native input's own box exactly — width 130px, height 35px (Slider.css:
-   `.slider` is 35px tall and centers its 4px-tall input inside that via
-   `align-items: center`, so the input's true vertical center is 35px / 2 =
-   17.5px from the rail's top regardless of what else — the value-text label
-   — shares that row and might be taller). The dot and bar are its
-   `position: absolute` children, positioned in the same px coordinates
-   this file has used since the gradient version (kept identical on
-   purpose, so this rewrite is a rendering-technique change, not a new
-   geometry) — see the two rules below for exactly which. Both carry
+   Structure: `.max-nodes-rail` is `position: relative` and sizes to its
+   content — it wraps the WHOLE Slider (input + value label), because a
+   fixed 130px width once let the label overflow the control's flex box and
+   visually collide with whatever ControlsBar rendered next. The dot and
+   bar are its `position: absolute` children, positioned in px against the
+   INPUT's zone only: the input is the row's first flex item with no
+   leading padding, so its x-origin coincides with the rail's, and its
+   width is fixed at 130px (Slider.css) — the bar therefore uses an
+   explicit width up to that 130px mark instead of `right: 0`, which would
+   wrongly extend it under the label. Vertical center: `.slider` is 35px
+   tall and centers its 4px-tall input via `align-items: center`, so the
+   input's true center is 17.5px from the rail's top regardless of the
+   label's own height. Both carry
    `pointer-events: none` (they must not steal drag/click from the actual
    `<input>` sitting on top of them) and `aria-hidden="true"` in the markup
    (MaxNodesControl.tsx) — decorative, the accessible name and value are
@@ -91,7 +94,7 @@
 .max-nodes-rail {
   position: relative;
   z-index: 0;
-  width: 130px;
+  width: fit-content;
   height: 35px;
 }
 
@@ -131,7 +134,10 @@
    answer, not a screenshot-verified one. */
 .max-nodes-rail-bar {
   left: 14.25px;
-  right: 0;
+  /* Ends at the input's 130px mark (Slider.css fixes the input width), not
+     `right: 0` — the rail now also wraps the value label, and a right-
+     anchored bar would run under it. */
+  width: calc(130px - 14.25px);
   height: 4px;
   transform: translateY(-50%);
   border-radius: 2px;
