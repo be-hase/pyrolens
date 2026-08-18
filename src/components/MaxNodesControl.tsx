@@ -132,23 +132,33 @@ export function MaxNodesControl() {
       <span className="max-nodes-control-label" id={labelId}>
         Max nodes
       </span>
-      <Slider
-        min={0}
-        max={PRESETS.length}
-        value={draftIndex}
-        label="Max nodes"
-        labelledBy={labelId}
-        valueText={LABELS[draftIndex]}
-        onInput={(index) => setDraftStr(String(index))}
-        onCommit={(index) => {
-          commitGeneration.current += 1;
-          setPending({
-            index,
-            baseline: committedIndex,
-            gen: commitGeneration.current,
-          });
-        }}
-      />
+      {/* Real elements, not a gradient painted on the track: three CSS
+          gradient attempts in a row each broke a different way (a
+          track-within-a-track look, alpha doubling where layers overlapped,
+          a soft/asymmetric fade edge at small sizes) — see MaxNodesControl.css
+          for the history. A dot and a bar sized and positioned in real CSS
+          pixels render crisp at any zoom the way a gradient edge cannot. */}
+      <div className="max-nodes-rail">
+        <span className="max-nodes-rail-dot" aria-hidden="true" />
+        <div className="max-nodes-rail-bar" aria-hidden="true" />
+        <Slider
+          min={0}
+          max={PRESETS.length}
+          value={draftIndex}
+          label="Max nodes"
+          labelledBy={labelId}
+          valueText={LABELS[draftIndex]}
+          onInput={(index) => setDraftStr(String(index))}
+          onCommit={(index) => {
+            commitGeneration.current += 1;
+            setPending({
+              index,
+              baseline: committedIndex,
+              gen: commitGeneration.current,
+            });
+          }}
+        />
+      </div>
     </div>
   );
 }

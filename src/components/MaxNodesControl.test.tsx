@@ -63,6 +63,12 @@ describe('MaxNodesControl', () => {
     assert.ok(wrapper?.getAttribute('title'));
   });
 
+  it('renders the dot and bar rail elements (real markup, not a track gradient)', () => {
+    render(<MaxNodesControl />);
+    assert.ok(document.querySelector('.max-nodes-rail-dot'));
+    assert.ok(document.querySelector('.max-nodes-rail-bar'));
+  });
+
   it('renders at the matching preset position for ?maxNodes=4096 (index 4: Default=0, then presets ascending)', () => {
     at('/?maxNodes=4096');
     render(<MaxNodesControl />);
