@@ -303,6 +303,66 @@ test('the refresh picker writes the chosen interval to the URL, and Off removes 
   expect(params().has('refresh')).toBe(false);
 });
 
+test('rapid Max nodes key presses coalesce into exactly one navigation and one refetch carrying the final value', async ({
+  page,
+}) => {
+  await page.goto(url('/'));
+  await expect(page.locator('.plfg-metadata-pill').first()).toBeVisible();
+
+  const params = () => new URL(page.url()).searchParams;
+  const slider = page.getByRole('slider', { name: 'Max nodes' });
+  // No maxNodes in the URL, so the slider starts at its LEFTMOST (Default)
+  // position — see MaxNodesControl.tsx's PRESETS/DEFAULT_INDEX: Default is
+  // index 0 on purpose, so a stray nudge only ever makes the cap smaller (or
+  // leaves it off), never bigger.
+  await expect(slider).toHaveAttribute('aria-valuetext', 'Default');
+
+  // Let the initial load's requests land before snapshotting the count —
+  // same "poll until stable" idiom as views.spec.ts's fgSearch client-side
+  // filtering test, so a still-in-flight initial fetch can't be mistaken
+  // for one this interaction caused.
+  let settled = -1;
+  await expect
+    .poll(async () => {
+      const len = (
+        await upstreamLog(page).then((log) =>
+          log.filter((e) => e.method === 'SelectMergeStacktraces'),
+        )
+      ).length;
+      if (len === settled) return 'stable';
+      settled = len;
+      return len;
+    })
+    .toBe('stable');
+  const before = settled;
+
+  await slider.focus();
+  // Five presses fired back to back, well inside MaxNodesControl's 350ms
+  // commit debounce: each fires its own native `change` (keyboard
+  // auto-repeat does the same, one per repeat tick), stepping the index
+  // 0 -> 5 (Default up to 8192). ArrowRight, not ArrowLeft: index 0 is a
+  // hard stop (min={0}), so ArrowLeft from Default would be a no-op and
+  // prove nothing here — that property has its own pin in
+  // MaxNodesControl.test.tsx. A regression that committed — and therefore
+  // refetched — per keystroke instead of coalescing the burst would show up
+  // below as more than one new request, or a request that isn't the final
+  // value.
+  for (let i = 0; i < 5; i++) {
+    await page.keyboard.press('ArrowRight');
+  }
+
+  await expect.poll(() => params().get('maxNodes')).toBe('8192');
+  await expect(slider).toHaveAttribute('aria-valuetext', '8k');
+
+  // Margin past the 350ms debounce plus the fetch it triggers.
+  await page.waitForTimeout(800);
+  const stacktraces = (await upstreamLog(page)).filter(
+    (entry) => entry.method === 'SelectMergeStacktraces',
+  );
+  expect(stacktraces.length).toBe(before + 1);
+  expect(stacktraces[stacktraces.length - 1].maxNodes).toBe(8192);
+});
+
 test('the tag explorer switches the label it groups by', async ({ page }) => {
   await page.goto(url('/explore', { groupBy: 'region' }));
   await expect(page.locator('.tag-explorer-table')).toBeVisible();

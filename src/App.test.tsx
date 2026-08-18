@@ -373,12 +373,12 @@ describe('App routing', () => {
 });
 
 describe('App defaults', () => {
-  it('defaults the range to the last hour', async () => {
+  it('defaults the range to 30 minutes', async () => {
     at('/?query=%7B%7D');
     render(<App />);
     await waitFor(() => assert.ok(screen.getByTestId('single')));
     const [start, end] = (seen('range') ?? '').split('-').map(Number);
-    assert.equal(end - start, 3_600_000);
+    assert.equal(end - start, 1_800_000);
   });
 
   it('advances "now" on every navigation, even one that changes nothing', async () => {

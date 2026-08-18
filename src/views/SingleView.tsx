@@ -79,6 +79,7 @@ export function SingleView({
         from={from}
         until={until}
         range={range}
+        showMaxNodes
       />
 
       <QueryBar

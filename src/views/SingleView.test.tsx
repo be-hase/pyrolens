@@ -67,6 +67,15 @@ describe('SingleView maxNodes wiring', () => {
     // signature in src/api/client.ts.
     assert.equal(flamegraphOf.mock.calls[0][1], 500);
   });
+
+  it('renders the Max nodes slider in ControlsBar', () => {
+    render(<SingleView {...PROPS} />);
+    assert.ok(screen.getByRole('slider', { name: 'Max nodes' }));
+    // The accessible name now comes from this same visible label
+    // (aria-labelledby, see MaxNodesControl.tsx) rather than a separate
+    // aria-label string — a single source for both.
+    assert.ok(screen.getByText('Max nodes'));
+  });
 });
 
 describe('SingleView retry wiring', () => {

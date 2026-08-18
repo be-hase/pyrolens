@@ -1,0 +1,156 @@
+.max-nodes-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 35px;
+  /* Opaque, theme-aware "rail" tone for the dot + bar below — local to this
+     control, not a general design token, because 28% was picked specifically
+     for these two shapes on this backdrop. Both inputs are theme tokens, so
+     light/dark derive automatically. 28% lands close to var(--border-strong)
+     — tried in an earlier round — 's own effective weight (hand-computed
+     against both themes' actual hex values in theme.css: border-strong's
+     alpha-over-bg-body works out to roughly a 25-26% mix in dark and 22-25%
+     in light), a touch stronger rather than weaker, in keeping with the
+     direction every round of feedback on this control has gone (too-faint
+     tokens got replaced with stronger ones, never the reverse). */
+  --mn-rail: color-mix(in srgb, var(--text-primary) 28%, var(--bg-body));
+}
+
+.max-nodes-control-label {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+/* Sets Default (index 0) apart from the ascending presets as a small DOT
+   sitting outside a continuous BAR, like `・ ●————`: a single point outside
+   the range reads truer than a mini track of its own — Default isn't "the
+   smallest cap", it's "no cap at all".
+
+   This is real markup (.max-nodes-rail-dot / .max-nodes-rail-bar below),
+   not CSS painted onto the native track pseudo-elements — three gradient
+   approaches were tried there first and each broke a different way once
+   looked at closely enough or in the right browser/zoom level:
+     - A recessed left segment (lighter shade + a small gap) read as its own
+       track-within-a-track, not a point outside the range.
+     - A dot radial + a rounded-cap radial + a bar linear, all translucent:
+       wherever the cap and bar gradients overlapped, two ~25%-alpha paints
+       compounded to ~44% — a visibly darker semicircle at the bar's left
+       end in the light theme specifically.
+     - `clip-path` on the track pseudo-element instead of a cap gradient,
+       to dodge the overlap by cutting the box short rather than drawing
+       over it: broke WebKit specifically, because `::-webkit-slider-thumb`
+       renders as a CHILD of `::-webkit-slider-runnable-track` in that
+       engine's shadow tree, so clipping the track clipped the thumb into a
+       rectangle too.
+     - Switching to an OPAQUE color (var(--mn-rail) above) fixed the
+       alpha-doubling without reintroducing the WebKit bug, restoring the
+       gradient geometry from the second attempt — but at 4x zoom the
+       gradient's soft/antialiased fade edge on the rounded cap still read
+       slightly asymmetric next to the crisp bar. A gradient edge is
+       fundamentally a blur across a few device pixels; at the ~2px radii
+       this control needs, that blur is a large fraction of the shape's own
+       size, and there was no more slack left to hide it in.
+   Real elements avoid all four failure modes at once: nothing paints on the
+   native track (so there is nothing for the thumb's shadow-tree position to
+   conflict with, and nothing for a second layer to alpha-stack against),
+   and a `border-radius` circle/pill renders with a crisp edge regardless of
+   how small it is, the same way any other rounded UI element in this app
+   does.
+
+   Structure: `.max-nodes-rail` is `position: relative`, sized to match the
+   native input's own box exactly — width 130px, height 35px (Slider.css:
+   `.slider` is 35px tall and centers its 4px-tall input inside that via
+   `align-items: center`, so the input's true vertical center is 35px / 2 =
+   17.5px from the rail's top regardless of what else — the value-text label
+   — shares that row and might be taller). The dot and bar are its
+   `position: absolute` children, positioned in the same px coordinates
+   this file has used since the gradient version (kept identical on
+   purpose, so this rewrite is a rendering-technique change, not a new
+   geometry) — see the two rules below for exactly which. Both carry
+   `pointer-events: none` (they must not steal drag/click from the actual
+   `<input>` sitting on top of them) and `aria-hidden="true"` in the markup
+   (MaxNodesControl.tsx) — decorative, the accessible name and value are
+   still the `<input>`'s own (aria-labelledby / aria-valuetext).
+   Stacking: `.max-nodes-rail` gets `z-index: 0` — on a `position: relative`
+   element this establishes a stacking context of its own — purely so the
+   dot/bar's `z-index: -1` stays scoped to sinking below the `<Slider>`
+   *within this control*, rather than potentially sinking below unrelated
+   later content elsewhere on the page (a negative z-index with no local
+   stacking-context boundary escapes to the nearest ancestor that has one,
+   which could be much further up the tree). Within that local context,
+   `.slider`/`<input>` (no `position` set, i.e. `static`) paints in the
+   normal-flow layer, which is ABOVE any `z-index: -1` descendant by
+   definition — so the rail sits behind the input's own painted content.
+   The input's own track background and the track pseudo-elements are set
+   to `transparent` below for exactly this to work: everywhere except the
+   thumb, the input has nothing of its own to paint, so the rail shows
+   through; where the thumb is, it's part of the input's normal-flow
+   content and correctly obscures the rail underneath it (e.g. when the
+   thumb sits at Default, it fully covers the dot — expected, unchanged
+   from every earlier round). */
+.max-nodes-rail {
+  position: relative;
+  z-index: 0;
+  width: 130px;
+  height: 35px;
+}
+
+.max-nodes-rail-dot,
+.max-nodes-rail-bar {
+  position: absolute;
+  top: 50%;
+  z-index: -1;
+  background: var(--mn-rail);
+  pointer-events: none;
+}
+
+/* The Default dot, centered on the THUMB's position at value 0, i.e.
+   x = <inset>px where inset is half the thumb's width (Slider.css fixes it
+   at 14px): inset = 14 / 2 = 7px. 6px diameter, deliberately larger than
+   the bar's 4px height: a circle carries less visual mass than a bar of
+   equal height and read as thinner at matched sizes. */
+.max-nodes-rail-dot {
+  left: 7px;
+  width: 6px;
+  height: 6px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+}
+
+/* The continuous bar, a true pill (border-radius = height / 2 on both
+   ends): starts at the 0/1 index boundary and runs to the input's own
+   right edge. The boundary is the THUMB's position at value 0.5, not
+   simply 0.5/8 = 6.25% of the track's own 130px box: the box is wider than
+   the thumb's actual travel, since a native range input insets travel by
+   half the thumb's width on each end.
+     inset    = thumbWidth / 2               = 7px
+     travel   = trackWidth - thumbWidth      = 116px
+     boundary = inset + (0.5 / 8) * travel   = 14.25px
+   Nudge `7px` (dot center) or `14.25px` (bar start) above/below if either
+   drifts visibly off the real thumb geometry — both are the formula's
+   answer, not a screenshot-verified one. */
+.max-nodes-rail-bar {
+  left: 14.25px;
+  right: 0;
+  height: 4px;
+  transform: translateY(-50%);
+  border-radius: 2px;
+}
+
+/* Nothing paints on the native input/track anymore — see the rail comment
+   above for why. Two separate rules for the vendor pseudo-elements, not one
+   comma-joined with ::-moz-range-track, for the same reason Slider.css's
+   focus rule is split — a selector list is invalid as a whole the moment
+   one selector in it is unsupported, and each vendor only recognizes its
+   own pseudo-element. */
+.max-nodes-control .slider-input {
+  background: transparent;
+}
+
+.max-nodes-control .slider-input::-webkit-slider-runnable-track {
+  background: transparent;
+}
+
+.max-nodes-control .slider-input::-moz-range-track {
+  background: transparent;
+}

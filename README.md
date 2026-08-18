@@ -162,7 +162,7 @@ All state is carried in query parameters; every view is shareable.
 | `sort`                                              | Tag Explorer breakdown table sort: `avg` or `max` (default: Share/sum)                          |
 | `fgSearch`                                          | flame graph search text; shared across Single, Comparison and Diff                              |
 | `fgSandwich`                                        | flame graph sandwich-view selection (function label); shared across Single, Comparison and Diff |
-| `maxNodes`                                          | positive integer (1–1,000,000) capping the flamegraph node count per query; server default when absent or invalid — a useful dial when heavy profiles are slow |
+| `maxNodes`                                          | caps flame graph detail per query (1–1,000,000, lower is faster); Default uses the server's own limit — set from the Max nodes slider on the flame-graph views (Single, Comparison, Diff) |
 
 Views: `/` (Single), `/comparison`, `/diff`, `/explore` (Tag Explorer).
 
