@@ -200,6 +200,19 @@ fine in a quick test.
   tick interval would never complete. Ticks skip while `fetchesInFlight()`
   (client.ts) is nonzero; anything else that navigates on a timer should do
   the same.
+- **A tick must not visually interrupt.** `navigate()`'s `tick` option
+  (urlState.ts) marks a RefreshPicker-caused reload; `useTickNavigation()`
+  lets a view compose `(loading && !tick) || startupGap` so the reload-dim
+  and the loading-placeholder-over-Empty swap are suppressed for it while the
+  panel meta's own "Loading…" still fires — a user-caused reload (Run, a
+  param edit, Back/Forward, a Retry click) still shows both. Without this, a
+  backend slower than the dim's delay pulsed the dim on every tick, and a
+  settled-empty view flickered its honest Empty message to Loading on every
+  one too. The marker is updated only by a navigation `advancesNow` judges
+  fetch-relevant — a view-only write (fgSearch settling, mid-tick-reload)
+  must not overwrite it either way, or it stops describing the reload
+  actually in flight — and `retry()` (useFetched.ts), which never navigates,
+  clears it through `markUserReload()` instead of a fake navigate() call.
 
 ### Building a query
 

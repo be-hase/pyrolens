@@ -2,7 +2,16 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import { fetchesInFlight } from '@api/client';
+import { navigate, useTickNavigation } from '../urlState.ts';
 import { RefreshPicker } from './RefreshPicker.tsx';
+
+// A tiny probe for the module-level tick marker navigate() leaves behind
+// (urlState.ts's `useTickNavigation`) — the only externally observable
+// trace of whether a given navigate() call passed `tick: true`, since it
+// never lands in the URL.
+function TickProbe() {
+  return <span data-testid="tick-probe">{String(useTickNavigation())}</span>;
+}
 
 vi.mock('@api/client', () => ({ fetchesInFlight: vi.fn() }));
 
@@ -52,6 +61,85 @@ const openPicker = (from = 'now-1h', until = 'now') => {
 beforeEach(() => {
   at('/');
   inFlightOf.mockReturnValue(0);
+  // A previous test's tick may have left the module-level marker set; a
+  // plain navigate() carries no tick option and settles it back to false
+  // (see urlState.test.ts's identical reset for useTickNavigation).
+  navigate({ set: {} });
+});
+
+describe('RefreshPicker marks its own tick navigations, not a manual pick', () => {
+  it('sets the tick marker when its own auto-refresh interval fires', () => {
+    at('/?refresh=30s');
+    vi.useFakeTimers();
+    try {
+      render(
+        <>
+          <RefreshPicker from="now-1h" until="now" />
+          <TickProbe />
+        </>,
+      );
+      assert.equal(screen.getByTestId('tick-probe').textContent, 'false');
+
+      act(() => vi.advanceTimersByTime(30_000));
+      assert.equal(
+        screen.getByTestId('tick-probe').textContent,
+        'true',
+        'the interval firing must navigate with the tick marker set',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('sets the tick marker on the immediate refresh when the tab regains visibility', () => {
+    at('/?refresh=30s');
+    const originalHidden = document.hidden;
+    const setHidden = (hidden: boolean) =>
+      Object.defineProperty(document, 'hidden', {
+        value: hidden,
+        configurable: true,
+      });
+    try {
+      render(
+        <>
+          <RefreshPicker from="now-1h" until="now" />
+          <TickProbe />
+        </>,
+      );
+      setHidden(true);
+      act(() => document.dispatchEvent(new Event('visibilitychange')));
+      setHidden(false);
+      act(() => document.dispatchEvent(new Event('visibilitychange')));
+      assert.equal(
+        screen.getByTestId('tick-probe').textContent,
+        'true',
+        'the on-return refresh is the same background cadence as a tick and must carry the same marker',
+      );
+    } finally {
+      Object.defineProperty(document, 'hidden', {
+        value: originalHidden,
+        configurable: true,
+      });
+    }
+  });
+
+  it('does not set the tick marker when an interval is selected by hand', () => {
+    at('/?refresh=30s');
+    render(
+      <>
+        <RefreshPicker from="now-1h" until="now" />
+        <TickProbe />
+      </>,
+    );
+    fireEvent.click(trigger());
+    fireEvent.click(panel().getByText('1m'));
+    assert.equal(params().get('refresh'), '1m'); // the pick landed, so this isn't a no-op navigate()
+    assert.equal(
+      screen.getByTestId('tick-probe').textContent,
+      'false',
+      'a manual interval pick must not carry the tick marker',
+    );
+  });
 });
 
 describe('RefreshPicker', () => {

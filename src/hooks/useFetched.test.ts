@@ -1,7 +1,17 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import assert from 'node:assert/strict';
-import { describe, it } from 'vitest';
+import { afterEach, describe, it } from 'vitest';
+import { navigate, useTickNavigation } from '../urlState.ts';
 import { useFetched } from './useFetched.ts';
+
+afterEach(() => {
+  // A test below arms urlState's tick marker directly (bypassing any
+  // component) to simulate auto-refresh's steady armed state; settle it
+  // back to false so it doesn't leak into another test in this file or the
+  // next file in the same worker (mirrors urlState.test.ts's identical
+  // resets).
+  navigate({ set: {} });
+});
 
 // The one fetch primitive every data hook is built on, so the protocol it
 // promises is pinned here rather than only through its callers.
@@ -440,5 +450,42 @@ describe('useFetched', () => {
     rerender({ q: 'b' });
     await waitFor(() => assert.equal(result.current.data, 'b'));
     assert.equal(result.current.retry, first);
+  });
+
+  it('retry() marks the reload as user-caused, even while auto-refresh has left the tick marker armed (DEFECT A)', async () => {
+    // With auto-refresh armed, urlState's tick marker's steady state
+    // between ticks is `true` (the last navigation was the previous tick —
+    // see useTickNavigation's doctrine). Retry is a user click, not a
+    // navigation at all, so without calling into urlState it would
+    // silently inherit that marker and suppress its own reload-dim /
+    // loading-placeholder — the opposite of what a Retry click means.
+    act(() => navigate({ set: {}, tick: true })); // simulate the armed steady state
+    let calls = 0;
+    const { result } = renderHook(() => ({
+      fetched: useFetched<string>(
+        'initial',
+        true,
+        async () => {
+          calls++;
+          if (calls === 1) return 'first';
+          return new Promise<string>(() => {}); // the retry's fetch stays pending
+        },
+        ['a'],
+      ),
+      tick: useTickNavigation(),
+    }));
+    await waitFor(() => assert.equal(result.current.fetched.data, 'first'));
+    // The fetch above never navigated, so the marker armed above is still
+    // standing — this is the bug this test pins.
+    assert.equal(result.current.tick, true);
+
+    act(() => {
+      result.current.fetched.retry();
+    });
+    assert.equal(
+      result.current.tick,
+      false,
+      'retry() must mark its reload as user-caused',
+    );
   });
 });

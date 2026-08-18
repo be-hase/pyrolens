@@ -1,7 +1,15 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import { fetchGroupedTimelines, fetchLabelNames } from '@api/client';
+import { navigate } from '../urlState.ts';
 import { TagExplorerView } from './TagExplorerView.tsx';
 import type { ViewProps } from '../App.tsx';
 
@@ -44,6 +52,10 @@ beforeEach(() => {
 
 afterEach(() => {
   at('/');
+  // A tick navigation in one test must not leak its marker into the next —
+  // a plain navigate() carries no tick option and settles it back to false
+  // (mirrors SingleView.test.tsx's identical reset).
+  navigate({ set: {} });
 });
 
 describe('TagExplorerView stale groupBy reset', () => {
@@ -247,6 +259,156 @@ describe('TagExplorerView loading placeholder', () => {
     assert.ok(
       !container.querySelector('.loading'),
       'the loading placeholder must not replace a chart that already has series',
+    );
+  });
+
+  it('does not dim the chart when the refetch is caused by a tick navigation — the panel meta still says "Loading…"', async () => {
+    // An auto-refresh tick is background activity (urlState.ts's
+    // useTickNavigation doctrine) — must not visually interrupt what's on
+    // screen. Same setup as the test above, but the pending refetch is
+    // marked as tick-caused (what RefreshPicker's own interval firing does)
+    // before it starts.
+    at('/?groupBy=region');
+    labelNamesOf.mockResolvedValue(['region', 'pod']);
+    groupedTimelinesOf.mockResolvedValueOnce([
+      { labelValue: 'a', points: [{ timestamp: 1_000_000, value: 5 }] },
+    ]);
+
+    const { container, rerender } = render(<TagExplorerView {...PROPS} />);
+    await waitFor(() => assert.ok(container.querySelector('.timeseries-svg')));
+    assert.ok(!container.querySelector('.reload-dim.active'));
+
+    groupedTimelinesOf.mockReturnValue(new Promise(() => {}));
+    act(() => navigate({ set: {}, tick: true }));
+    rerender(
+      <TagExplorerView
+        {...PROPS}
+        range={{ start: 2_000_000, end: 5_600_000 }}
+      />,
+    );
+    await waitFor(() => assert.equal(groupedTimelinesOf.mock.calls.length, 2));
+
+    assert.ok(
+      !container.querySelector('.reload-dim.active'),
+      'a tick-caused reload must not dim the timeline chart',
+    );
+    const panel = screen
+      .getByText('Timeline by region')
+      .closest<HTMLElement>('.panel')!;
+    assert.ok(
+      within(panel).getByText('Loading…'),
+      'the panel meta must keep announcing the reload during a tick',
+    );
+    assert.ok(
+      panel.querySelector('.loading-meta .loading-spin'),
+      'expected the meta spinner (LoadingMeta) next to the text',
+    );
+  });
+
+  it('dims the chart when the same reload is caused by a user navigation', async () => {
+    at('/?groupBy=region');
+    labelNamesOf.mockResolvedValue(['region', 'pod']);
+    groupedTimelinesOf.mockResolvedValueOnce([
+      { labelValue: 'a', points: [{ timestamp: 1_000_000, value: 5 }] },
+    ]);
+
+    const { container, rerender } = render(<TagExplorerView {...PROPS} />);
+    await waitFor(() => assert.ok(container.querySelector('.timeseries-svg')));
+
+    groupedTimelinesOf.mockReturnValue(new Promise(() => {}));
+    // No tick marker — a `range` change with no tick is what a Run press,
+    // a param edit, or Back/Forward looks like from the view's perspective.
+    rerender(
+      <TagExplorerView
+        {...PROPS}
+        range={{ start: 2_000_000, end: 5_600_000 }}
+      />,
+    );
+    await waitFor(() => assert.equal(groupedTimelinesOf.mock.calls.length, 2));
+
+    await waitFor(() =>
+      assert.ok(
+        container.querySelector('.reload-dim.active'),
+        'a user-caused reload must still dim the timeline chart',
+      ),
+    );
+  });
+});
+
+describe('TagExplorerView: a tick-caused reload over a settled-empty breakdown must not swap the Empty message for the Loading placeholder', () => {
+  it('via tick: the "nothing to break down" message stays', async () => {
+    at('/?groupBy=region');
+    labelNamesOf.mockResolvedValue(['region', 'pod']);
+    groupedTimelinesOf.mockResolvedValueOnce([]);
+
+    const { rerender } = render(<TagExplorerView {...PROPS} />);
+    await waitFor(() =>
+      assert.ok(
+        screen.getByText(
+          /No profiles matched this query in this range, so there is nothing to/,
+        ),
+      ),
+    );
+
+    groupedTimelinesOf.mockReturnValueOnce(new Promise(() => {}));
+    act(() => navigate({ set: {}, tick: true }));
+    rerender(
+      <TagExplorerView
+        {...PROPS}
+        range={{ start: 2_000_000, end: 5_600_000 }}
+      />,
+    );
+    await waitFor(() => assert.equal(groupedTimelinesOf.mock.calls.length, 2));
+
+    assert.ok(
+      screen.getByText(
+        /No profiles matched this query in this range, so there is nothing to/,
+      ),
+      'a tick reload over a settled-empty breakdown must keep the honest Empty message',
+    );
+    // Both the Breakdown panel and the timeline chart derive their
+    // loading-or-empty choice from the same `stillWorking` value, so if
+    // either wrongly swapped to Loading this would be nonzero.
+    assert.equal(
+      screen.queryAllByRole('status').length,
+      0,
+      'must not swap the Empty message for the Loading placeholder on a tick',
+    );
+  });
+
+  it('via a user navigation: the Loading placeholder replaces the Empty message, as today', async () => {
+    at('/?groupBy=region');
+    labelNamesOf.mockResolvedValue(['region', 'pod']);
+    groupedTimelinesOf.mockResolvedValueOnce([]);
+
+    const { rerender } = render(<TagExplorerView {...PROPS} />);
+    await waitFor(() =>
+      assert.ok(
+        screen.getByText(
+          /No profiles matched this query in this range, so there is nothing to/,
+        ),
+      ),
+    );
+
+    groupedTimelinesOf.mockReturnValueOnce(new Promise(() => {}));
+    rerender(
+      <TagExplorerView
+        {...PROPS}
+        range={{ start: 2_000_000, end: 5_600_000 }}
+      />,
+    );
+    await waitFor(() => assert.equal(groupedTimelinesOf.mock.calls.length, 2));
+
+    await waitFor(() =>
+      assert.ok(
+        screen.queryAllByRole('status').length > 0,
+        'a user-caused reload must still swap the Empty message for the Loading placeholder',
+      ),
+    );
+    assert.ok(
+      !screen.queryByText(
+        /No profiles matched this query in this range, so there is nothing to/,
+      ),
     );
   });
 });

@@ -28,9 +28,13 @@ function parseRefresh(value: string | null): number | null {
 
 // Auto-refresh picker, rendered next to TimeRangePicker. The interval lives
 // in the `refresh` URL param like everything else; ticking is implemented by
-// calling navigate({ set: {} }) on a timer, the same no-op-but-still-fires
-// navigation Run uses, so it advances the frozen "now" and refires every
-// relative-range fetch without any refresh mechanism of its own.
+// calling navigate({ set: {}, tick: true }) on a timer, the same
+// no-op-but-still-fires navigation Run uses, so it advances the frozen "now"
+// and refires every relative-range fetch without any refresh mechanism of
+// its own. The `tick: true` marker (urlState.ts) is what lets a view tell
+// this background reload apart from Run/a param edit and keep its chart
+// visuals from dimming/swapping to a placeholder over it — selecting an
+// interval by hand, just below, is a user action and must not carry it.
 //
 // Built on core/Select, which already has the listbox/option/aria-selected
 // semantics this widget needs — a menu-flavoured popup of plain buttons
@@ -86,7 +90,11 @@ export function RefreshPicker({
         // bounded by the transport's own timeout upstream rather than by
         // anything this component does.
         if (fetchesInFlight() > 0) return;
-        navigate({ set: {} });
+        // Marks this as background activity (urlState.ts's
+        // useTickNavigation doctrine) — views use it to suppress the
+        // reload-dim / loading-placeholder swap for a reload this tick
+        // caused, while the panel meta's own "Loading…" keeps showing.
+        navigate({ set: {}, tick: true });
       }, interval);
     };
     const onVisibilityChange = () => {
@@ -97,8 +105,11 @@ export function RefreshPicker({
         // On return the user wants fresh data now, not up to `interval`
         // later — fire once immediately, then resume the normal cadence.
         // Same in-flight check as the tick: a request from just before the
-        // tab was hidden may still be outstanding.
-        if (fetchesInFlight() === 0) navigate({ set: {} });
+        // tab was hidden may still be outstanding. Tick-marked for the same
+        // reason the interval fire is: the tab regaining focus is not the
+        // user asking for a reload, so it must not visually interrupt
+        // either.
+        if (fetchesInFlight() === 0) navigate({ set: {}, tick: true });
         start();
       }
     };
