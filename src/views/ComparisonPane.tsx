@@ -2,7 +2,7 @@ import { Button } from '@components/core/Button';
 import { Panel } from '@components/Panel';
 import { QueryBar } from '@components/QueryBar';
 import { TimeSeries } from '@components/TimeSeries';
-import { useTimeline } from '@hooks/useProfileData';
+import type { Point } from '@api/client';
 import { useEditBuffer } from '@hooks/useEditBuffer';
 import { splitQuery } from '../queryLang';
 import { formatPaneWindow, type TimeRange } from '../time';
@@ -56,6 +56,14 @@ export function ComparisonPane({
   mainFrom,
   tenantID,
   queryStartupGap,
+  timeline,
+  loading,
+  error,
+  retry,
+  extraLoading,
+  draft: controlledDraft,
+  onDraftChange,
+  hideRunButton,
   children,
 }: {
   title: string;
@@ -76,13 +84,38 @@ export function ComparisonPane({
    * computes this once from `settled` state instead.
    */
   queryStartupGap?: boolean;
+  /**
+   * This pane's timeline, fetched by the parent view (ComparisonView /
+   * DiffView) via `useTimeline` rather than in here. Both views need to see
+   * this hook's state anyway — DiffView's global Run busy state is the diff
+   * fetch OR either pane timeline's `loading` — so it is fetched once, up
+   * there, instead of a second call site duplicating the request.
+   */
+  timeline: Point[];
+  loading: boolean;
+  error: string | null;
+  retry?: () => void;
+  /**
+   * OR'd into this pane's Run-button busy state on top of `loading` — a
+   * Run reflects every fetch its commit would supersede, and on Comparison
+   * that includes this pane's flame graph (ComparisonView's PaneFlamegraph),
+   * which this component otherwise never sees. Unused on Diff, where the
+   * per-pane Run button is hidden.
+   */
+  extraLoading?: boolean;
+  /**
+   * Controlled draft override. DiffView owns both panes' drafts itself (see
+   * its global Run, which needs to read them to decide what to commit) and
+   * passes them down here instead of letting this component's own edit
+   * buffer hold them; Comparison leaves both undefined and keeps the
+   * uncontrolled path below.
+   */
+  draft?: string;
+  onDraftChange?: (next: string) => void;
+  /** Hides this pane's own Run button — see QueryBar's identical prop. */
+  hideRunButton?: boolean;
   children?: React.ReactNode;
 }) {
-  const { timeline, loading, error, retry } = useTimeline({
-    query: pane.query,
-    range: mainRange,
-    tenantID,
-  });
   const { profileTypeID } = splitQuery(pane.query);
   const settlingQuery = !!queryStartupGap && !profileTypeID;
   // An auto-refresh tick must not visually interrupt (urlState.ts's
@@ -91,7 +124,13 @@ export function ComparisonPane({
   // `loading` below, unchanged) keeps firing on every reload.
   const tickNav = useTickNavigation();
 
-  const [draft, setDraft] = useEditBuffer(pane.query);
+  // Always called, unconditionally (rules of hooks) — its result is simply
+  // unused when the caller controls the draft instead. Keeps the edit
+  // buffer's reset-on-URL-change logic living in one place rather than a
+  // second copy for the controlled path.
+  const [internalDraft, setInternalDraft] = useEditBuffer(pane.query);
+  const draft = controlledDraft ?? internalDraft;
+  const setDraft = onDraftChange ?? setInternalDraft;
 
   // Null on both means the pane is still resolving its default half (see
   // useComparisonParams) rather than a range the user brushed or deep-linked
@@ -152,7 +191,8 @@ export function ComparisonPane({
           start={mainRange.start}
           end={mainRange.end}
           tenantID={tenantID}
-          loading={loading}
+          loading={loading || !!extraLoading}
+          hideRunButton={hideRunButton}
         />
         {error && <ErrorBanner error={error} retry={retry} />}
         <TimeSeries

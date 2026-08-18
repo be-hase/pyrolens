@@ -3,6 +3,38 @@ import { Icon } from '@components/core/Icon';
 import { useLabelSuggestions } from '@hooks/useLabelSuggestions';
 import './QueryBar.css';
 
+// The Run control itself, factored out so DiffView's single global Run
+// (one joint fetch over both panes, so per-pane Run buttons there are
+// hidden — see the `hideRunButton` prop below) renders with the exact same
+// markup/styling instead of a hand-copied button. A control's busy state is
+// a calm indicator like the panel metas', not a chart visual — callers pass
+// the full `loading` value, never the tick-suppressed one (urlState.ts's
+// useTickNavigation doctrine is about chart visuals only).
+export function RunButton({
+  loading = false,
+  onClick,
+}: {
+  loading?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="querybar-run"
+      onClick={onClick}
+      disabled={loading}
+      aria-busy={loading}
+    >
+      <Icon
+        name={loading ? 'refresh' : 'play'}
+        size={14}
+        className={loading ? 'querybar-spin' : undefined}
+      />
+      Run
+    </button>
+  );
+}
+
 // Query input row with a Run button. While editing inside the `{...}`
 // selector a fuzzy typeahead popup suggests label names and, after an
 // operator, label values.
@@ -15,6 +47,7 @@ export function QueryBar({
   end,
   tenantID,
   loading = false,
+  hideRunButton = false,
 }: {
   /** The draft being edited (an edit buffer over `committedQuery`). */
   query: string;
@@ -27,6 +60,14 @@ export function QueryBar({
   tenantID?: string;
   /** Shows a spinner on the Run button while the query is in flight. */
   loading?: boolean;
+  /**
+   * Hides this bar's own Run button while leaving Enter's commit-this-pane
+   * behavior untouched — Diff's per-pane query bars use this: the diff
+   * flame graph is one joint query over both panes, so a per-pane Run there
+   * would misleadingly suggest it alone refreshes anything. DiffView renders
+   * one global Run (RunButton, above) instead.
+   */
+  hideRunButton?: boolean;
 }) {
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -160,20 +201,7 @@ export function QueryBar({
           </ul>
         )}
       </div>
-      <button
-        type="button"
-        className="querybar-run"
-        onClick={run}
-        disabled={loading}
-        aria-busy={loading}
-      >
-        <Icon
-          name={loading ? 'refresh' : 'play'}
-          size={14}
-          className={loading ? 'querybar-spin' : undefined}
-        />
-        Run
-      </button>
+      {!hideRunButton && <RunButton loading={loading} onClick={run} />}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { splitQuery } from '../src/queryLang.ts';
 import {
   clearUpstreamLog,
   expectCanvasPainted,
@@ -454,6 +455,66 @@ test('the diff view honours a deep-linked fgSearch, instead of the uncontrolled 
   await expect(page.getByRole('textbox', { name: 'Search' })).toHaveValue(
     'queryDatabase',
   );
+});
+
+test('the diff view has a single Run that commits only the pane actually edited', async ({
+  page,
+}) => {
+  // Neither leftQuery nor rightQuery is deep-linked, so both panes inherit
+  // meta.query — the diff flame graph is one joint fetch over both, so
+  // per-pane Run buttons are hidden on this view (see DiffView/QueryBar's
+  // hideRunButton) in favor of the single one above the panes.
+  await page.goto(
+    url('/diff', {
+      leftFrom: meta.left.start,
+      leftUntil: meta.left.end,
+      rightFrom: meta.right.start,
+      rightUntil: meta.right.end,
+    }),
+  );
+  await expect(
+    page.getByRole('cell', { name: 'main.slowRegression' }),
+  ).toBeVisible();
+
+  // The left ("Baseline") pane's query bar renders first in the DOM (see
+  // the pane-header test above).
+  const leftInput = page.getByRole('combobox').first();
+  const edited = `{service_name="${meta.service}", profile_type="${meta.profileType}", region="eu-west"}`;
+  await leftInput.fill(edited);
+  // Filled, not committed — Enter was never pressed, and this is not the
+  // per-pane Run (there is none here).
+  expect(new URL(page.url()).searchParams.get('leftQuery')).toBeNull();
+
+  await clearUpstreamLog(page);
+  // Exact: distinguishes this from "Reset window"/"Swap sides", and there is
+  // only one "Run" on this view now.
+  await page.getByRole('button', { name: 'Run', exact: true }).click();
+
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get('leftQuery'))
+    .toBe(edited);
+  // The absence-inherits invariant (AGENTS.md): the right pane was never
+  // touched, so its inherited value must not be materialized as an
+  // override.
+  expect(new URL(page.url()).searchParams.has('rightQuery')).toBe(false);
+
+  const expectedLeftSelector = splitQuery(edited).labelSelector;
+  const expectedRightSelector = splitQuery(meta.query).labelSelector;
+  await expect
+    .poll(async () => {
+      const diffCalls = (await upstreamLog(page)).filter(
+        (entry) => entry.method === 'Diff',
+      );
+      return (
+        diffCalls.length > 0 &&
+        diffCalls.every(
+          (entry) =>
+            entry.leftLabelSelector === expectedLeftSelector &&
+            entry.rightLabelSelector === expectedRightSelector,
+        )
+      );
+    })
+    .toBe(true);
 });
 
 test('"Diff vs previous" on Single jumps to Diff with an abutting equal-duration baseline', async ({

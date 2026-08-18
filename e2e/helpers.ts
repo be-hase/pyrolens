@@ -66,6 +66,9 @@ export interface UpstreamCall {
   groupBy: string[] | null;
   profileTypeID: string | null;
   labelSelector: string | null;
+  /** Diff's per-side labelSelector — see fake-pyroscope.mjs's wire-shape note. */
+  leftLabelSelector: string | null;
+  rightLabelSelector: string | null;
   start: number | null;
   end: number | null;
   step: number | null;

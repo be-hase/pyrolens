@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, describe, it, vi } from 'vitest';
 import { fetchFlamegraph, fetchTimeline } from '@api/client';
@@ -233,5 +233,40 @@ describe("ComparisonView: a tick-caused reload must not dim a pane's flame graph
         'a user-caused reload must still dim the pane flame graphs',
       ),
     );
+  });
+});
+
+describe("ComparisonView: a pane's Run button reflects its flame graph fetch too, not just its timeline", () => {
+  it('stays busy while only the flame graph fetch is pending, with the timeline already settled', async () => {
+    // Timeline resolves immediately; flamegraph never resolves during this
+    // test. Unify Run's busy state to timeline OR flamegraph — today
+    // ComparisonPane's QueryBar only reflects its own timeline hook, so this
+    // pins the gap: the pane's flame graph panel would show "Loading…" while
+    // Run sits idle, letting the user re-click Run mid-fetch.
+    timelineOf.mockResolvedValue([]);
+    flamegraphOf.mockReturnValue(new Promise(() => {}));
+
+    render(<ComparisonView {...PROPS} />);
+
+    // Let the (already-resolved) timeline fetches actually settle first —
+    // checking the Run button immediately would trivially see it busy from
+    // BOTH hooks starting loading at mount, which is true before and after
+    // this fix and would not catch the gap: only once the timeline settles
+    // does whether Run also reflects the still-pending flame graph matter.
+    await waitFor(() => assert.equal(timelineOf.mock.calls.length, 2));
+    await act(async () => {});
+
+    const baselinePanel = screen
+      .getByText('Baseline')
+      .closest<HTMLElement>('.panel')!;
+    const runButton = within(baselinePanel).getByRole('button', {
+      name: /Run/,
+    });
+    assert.equal(
+      (runButton as HTMLButtonElement).disabled,
+      true,
+      "expected the Baseline pane's Run button to stay busy while its flame graph fetch is still pending, even though its timeline has already settled",
+    );
+    assert.equal(runButton.getAttribute('aria-busy'), 'true');
   });
 });
