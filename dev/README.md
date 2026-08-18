@@ -73,7 +73,7 @@ keep one.)
 Writes all four views in both themes to `dev/screenshots/` (git-ignored) and
 exits non-zero if any view failed to render or logged a page error. `FROM` /
 `UNTIL` pin the main time range — useful while the load generator is still
-warming up and a default `now-1h` would be mostly empty axis.
+warming up and a default `now-30m` would be mostly empty axis.
 
 The README's screenshots were produced this way, after letting the load
 generator run for about ten minutes:

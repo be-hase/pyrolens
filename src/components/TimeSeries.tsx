@@ -406,8 +406,8 @@ export function TimeSeries({
                 // millisecond once the visible span is sub-second (a few
                 // brush-zooms deep). Selecting that would send
                 // from === until, which resolveRange (src/time.ts) silently
-                // replaces with a fabricated 1-hour window instead of
-                // failing loudly.
+                // replaces with a fabricated DEFAULT_SPAN_MS-wide window
+                // instead of failing loudly.
                 if (untilMs > fromMs) onRangeSelect?.(fromMs, untilMs);
               }}
               onPointerLeave={() => setHoverX(null)}

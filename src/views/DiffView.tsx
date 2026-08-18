@@ -128,6 +128,7 @@ export function DiffView({
         from={from}
         until={until}
         range={range}
+        showMaxNodes
       />
       {/* Same spot in Comparison and Diff — above the panes, right-aligned —
           so the control is where muscle memory expects it in either view.

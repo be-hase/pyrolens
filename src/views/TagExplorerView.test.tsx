@@ -392,3 +392,10 @@ describe('TagExplorerView settled-empty labels stay honest through a background 
 // environment. The wiring this drives (`stillWorking` swapping the
 // Breakdown panel between Loading and the table) already has coverage above
 // ("TagExplorerView loading placeholder" / "label-fetch stage").
+
+describe('TagExplorerView ControlsBar', () => {
+  it('does not render the Max nodes slider — there is no flame graph here', () => {
+    render(<TagExplorerView {...PROPS} />);
+    assert.ok(!screen.queryByRole('slider', { name: 'Max nodes' }));
+  });
+});

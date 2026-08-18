@@ -1,0 +1,74 @@
+.slider {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 35px;
+}
+
+.slider-input {
+  width: 130px;
+  height: 4px;
+  padding: 0;
+  margin: 0;
+  background: var(--border-medium);
+  border: none;
+  border-radius: var(--radius-sm);
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.slider-input::-webkit-slider-runnable-track {
+  height: 4px;
+  background: var(--border-medium);
+  border-radius: var(--radius-sm);
+}
+
+.slider-input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  cursor: pointer;
+}
+
+.slider-input::-moz-range-track {
+  height: 4px;
+  background: var(--border-medium);
+  border-radius: var(--radius-sm);
+}
+
+.slider-input::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: var(--color-primary);
+  cursor: pointer;
+}
+
+.slider-input:focus-visible {
+  outline: none;
+}
+
+/* One rule per vendor pseudo-element, not a comma-joined list: a selector
+   list is invalid as a whole the moment any one selector in it is
+   unsupported, and ::-moz-range-thumb is not a valid selector in
+   Blink/WebKit (nor is ::-webkit-slider-thumb in Gecko) — joining them left
+   Chrome/Safari keyboard users with no focus indicator at all, silently. */
+.slider-input:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--action-focus);
+}
+
+.slider-input:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px var(--action-focus);
+}
+
+.slider-value {
+  min-width: 3em;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}

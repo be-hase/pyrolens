@@ -10,10 +10,33 @@ const UNIT_MS: Record<string, number> = {
   w: 604_800_000,
 };
 
+// Shared by resolveTime and DEFAULT_SPAN_MS's derivation below — both pull
+// the same (count, unit) pair out of a "now-N<unit>" string.
+const RELATIVE_OFFSET = /^now-(\d+)([smhdw])$/;
+
 // The default main window, written once: App resolves it and the controls
-// display it, and the two must never disagree.
-export const DEFAULT_FROM = 'now-1h';
+// display it.
+export const DEFAULT_FROM = 'now-30m';
 export const DEFAULT_UNTIL = 'now';
+
+// Derived from DEFAULT_FROM by parsing it with the same "now-N<unit>"
+// machinery resolveTime uses below, rather than the other way round
+// (computing DEFAULT_FROM from a raw ms constant). Going from ms to a string
+// would silently produce an unparseable "now-1.5m" the moment the span
+// stopped dividing evenly by whatever unit was chosen, and every downstream
+// reader — formatRangeLabel, previousPeriodParams' relative branch, the
+// preset highlight — would degrade with no visible error. Parsing at module
+// init instead means a DEFAULT_FROM that doesn't express as a relative
+// offset fails loudly at startup, which is what a value that can't is
+// supposed to do: this is a build-time mistake, not a runtime one.
+const DEFAULT_FROM_MATCH = DEFAULT_FROM.match(RELATIVE_OFFSET);
+if (!DEFAULT_FROM_MATCH) {
+  throw new Error(
+    `DEFAULT_FROM (${DEFAULT_FROM}) must be a "now-N<unit>" relative offset`,
+  );
+}
+export const DEFAULT_SPAN_MS =
+  parseInt(DEFAULT_FROM_MATCH[1], 10) * UNIT_MS[DEFAULT_FROM_MATCH[2]];
 
 export function isRelative(value: string): boolean {
   return value === 'now' || /^now-\d+[smhdw]$/.test(value);
@@ -27,7 +50,7 @@ export function resolveTime(
 ): number {
   if (!value) return fallback;
   if (value === 'now') return nowMs;
-  const rel = value.match(/^now-(\d+)([smhdw])$/);
+  const rel = value.match(RELATIVE_OFFSET);
   if (rel) return nowMs - parseInt(rel[1], 10) * (UNIT_MS[rel[2]] ?? 60_000);
   const abs = Number(value);
   if (Number.isFinite(abs) && abs > 0) {
@@ -72,8 +95,8 @@ export function resolveRange(
   nowMs: number,
 ): TimeRange {
   const end = resolveTime(until, nowMs, nowMs);
-  const start = resolveTime(from, end - 3_600_000, nowMs);
-  return start < end ? { start, end } : { start: end - 3_600_000, end };
+  const start = resolveTime(from, end - DEFAULT_SPAN_MS, nowMs);
+  return start < end ? { start, end } : { start: end - DEFAULT_SPAN_MS, end };
 }
 
 /** "Aug 7 09:30 – Aug 7 10:30" for an already-resolved range. */
@@ -138,7 +161,10 @@ export function formatRangeLabel(
   range: TimeRange,
 ): string {
   if ((!until || until === 'now') && (!from || isRelative(from))) {
-    const rel = !from || from === 'now' ? '1h' : from.slice(4);
+    // An absent/bare-"now" `from` resolves to DEFAULT_FROM (App.tsx never
+    // writes it into the URL), so its label must read that off DEFAULT_FROM
+    // too rather than a hardcoded span that would silently drift from it.
+    const rel = !from || from === 'now' ? DEFAULT_FROM.slice(4) : from.slice(4);
     return `Last ${rel}`;
   }
   return formatAbsoluteRange(range);

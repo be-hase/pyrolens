@@ -71,6 +71,13 @@ afterEach(() => {
   at('/');
 });
 
+describe('DiffView ControlsBar', () => {
+  it('renders the Max nodes slider', () => {
+    render(<DiffView {...PROPS} />);
+    assert.ok(screen.getByRole('slider', { name: 'Max nodes' }));
+  });
+});
+
 describe('DiffView profile-type mismatch', () => {
   it('does not request a diff and explains the mismatch when panes name different profile types', async () => {
     const params = new URLSearchParams();

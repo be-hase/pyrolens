@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 import {
+  DEFAULT_SPAN_MS,
   formatMonthDay,
   formatPaneWindow,
   formatRangeLabel,
@@ -91,11 +92,12 @@ describe('resolveTime', () => {
 });
 
 describe('resolveRange', () => {
-  it('defaults to the last hour', () => {
+  it('defaults to DEFAULT_SPAN_MS (30 minutes) when from is absent', () => {
     assert.deepEqual(resolveRange(null, null, NOW), {
-      start: NOW - HOUR,
+      start: NOW - DEFAULT_SPAN_MS,
       end: NOW,
     });
+    assert.equal(DEFAULT_SPAN_MS, 1_800_000);
   });
 
   it('resolves a relative from against an absolute until', () => {
@@ -112,23 +114,23 @@ describe('resolveRange', () => {
     });
   });
 
-  it('replaces an inverted range with the hour before its end', () => {
+  it('replaces an inverted range with DEFAULT_SPAN_MS before its end', () => {
     // Hand-edited URLs and a relative `from` paired with an absolute past
     // `until` both land here; an inverted range would query nothing.
     const end = NOW - 6 * HOUR;
     assert.deepEqual(resolveRange(String(NOW), String(end), NOW), {
-      start: end - HOUR,
+      start: end - DEFAULT_SPAN_MS,
       end,
     });
     assert.deepEqual(resolveRange('now-1h', String(end), NOW), {
-      start: end - HOUR,
+      start: end - DEFAULT_SPAN_MS,
       end,
     });
   });
 
   it('replaces a zero-length range too', () => {
     assert.deepEqual(resolveRange(String(NOW), String(NOW), NOW), {
-      start: NOW - HOUR,
+      start: NOW - DEFAULT_SPAN_MS,
       end: NOW,
     });
   });
@@ -153,11 +155,11 @@ describe('formatRangeLabel', () => {
     );
   });
 
-  it('labels an unset range as the default hour', () => {
-    assert.equal(formatRangeLabel(null, null, range(null, null)), 'Last 1h');
+  it('labels an unset range as the default span', () => {
+    assert.equal(formatRangeLabel(null, null, range(null, null)), 'Last 30m');
     assert.equal(
       formatRangeLabel('now', 'now', range('now', 'now')),
-      'Last 1h',
+      'Last 30m',
     );
   });
 

@@ -67,6 +67,11 @@ describe('SingleView maxNodes wiring', () => {
     // signature in src/api/client.ts.
     assert.equal(flamegraphOf.mock.calls[0][1], 500);
   });
+
+  it('renders the Max nodes slider in ControlsBar', () => {
+    render(<SingleView {...PROPS} />);
+    assert.ok(screen.getByRole('slider', { name: 'Max nodes' }));
+  });
 });
 
 describe('SingleView retry wiring', () => {
