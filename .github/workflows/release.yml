@@ -111,7 +111,7 @@ jobs:
         run: test -f dist/index.html || { echo "dist/index.html missing after downloading the ui-dist artifact" >&2; exit 1; }
       # goreleaser's sboms: step (.goreleaser.yaml) shells out to `syft`,
       # which isn't preinstalled on the runner.
-      - uses: anchore/sbom-action/download-syft@aa80c8c5bd439a416a62804f2151ab38c671a638 # v0.24.1
+      - uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
       # The arm64 images are built on an amd64 runner.
       - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
