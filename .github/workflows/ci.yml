@@ -104,7 +104,7 @@ jobs:
         with:
           # Kept in step with the version release.yml pins, or this validates
           # against a different toolchain than the one that runs.
-          version: v2.18.1
+          version: v2.18.2
           args: check
 
   # The browser tests drive the real binary against a fake Pyroscope replaying
