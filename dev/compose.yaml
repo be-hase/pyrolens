@@ -14,7 +14,7 @@ services:
   # Renovate (docker:pinDigests, renovate.json5) one consistent pattern to
   # maintain everywhere.
   pyroscope:
-    image: grafana/pyroscope:2.3.1@sha256:86a9ee7448487409ead8ada78789de7b78b739711b92b5d7224a1a54abf3eeb2
+    image: grafana/pyroscope:2.3.2@sha256:78c3b509f2ad98a6974b38c6f2135d5daf9597809532560e9ca29f9b43aa339e
     command: ['-auth.multitenancy-enabled']
     ports: ['4040:4040']
 
@@ -46,7 +46,7 @@ services:
 
   # Single-tenant: no tenant UI at all. Opt in with `--profile single`.
   pyroscope-single:
-    image: grafana/pyroscope:2.3.1@sha256:86a9ee7448487409ead8ada78789de7b78b739711b92b5d7224a1a54abf3eeb2
+    image: grafana/pyroscope:2.3.2@sha256:78c3b509f2ad98a6974b38c6f2135d5daf9597809532560e9ca29f9b43aa339e
     ports: ['4045:4040']
     profiles: ['single']
 
